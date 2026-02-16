@@ -1,0 +1,9 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+TERGM = "e5f6a7b8-c9d0-1234-ef56-789012345678"
+
+[sources]
+TERGM = {path = ".."}
+
+[compat]
+Documenter = "1"

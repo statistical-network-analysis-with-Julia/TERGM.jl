@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- Filters for Depth/Shadow -->
+    <filter id="dropShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4"/>
+      <feOffset dx="2" dy="2" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode in="offsetblur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Gradients for Julia Colors -->
+    <!-- Purple -->
+    <radialGradient id="grad-purple" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" style="stop-color:#b57fe3;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#9558B2;stop-opacity:1" />
+    </radialGradient>
+
+    <!-- Red -->
+    <radialGradient id="grad-red" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" style="stop-color:#e65c53;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#CB3C33;stop-opacity:1" />
+    </radialGradient>
+
+    <!-- Green -->
+    <radialGradient id="grad-green" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" style="stop-color:#5cb84b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#389826;stop-opacity:1" />
+    </radialGradient>
+
+    <!-- Arrow Marker -->
+    <marker id="arrowhead" markerWidth="5" markerHeight="5" refX="5" refY="2.5" orient="auto">
+      <polygon points="0 0, 5 2.5, 0 5" fill="#4063D8" />
+    </marker>
+  </defs>
+
+  <!-- Background Container (White rounded rect) -->
+  <rect x="24" y="24" width="464" height="464" rx="80" fill="#ffffff" stroke="#e0e0e0" stroke-width="2"/>
+
+  <!-- Left network (t-1) -->
+  <g transform="translate(100, 80) scale(1.6)">
+    <!-- Edges: solid = persist, dashed = dissolve -->
+    <line x1="0" y1="0" x2="50" y2="45" stroke="#389826" stroke-width="4"/>
+    <line x1="50" y1="45" x2="0" y2="90" stroke="#CB3C33" stroke-width="3.5" stroke-dasharray="6,4"/>
+    <line x1="0" y1="0" x2="0" y2="90" stroke="#9558B2" stroke-width="4"/>
+
+    <!-- Nodes -->
+    <circle cx="0" cy="0" r="14" fill="url(#grad-purple)" filter="url(#dropShadow)"/>
+    <circle cx="50" cy="45" r="14" fill="url(#grad-red)" filter="url(#dropShadow)"/>
+    <circle cx="0" cy="90" r="14" fill="url(#grad-green)" filter="url(#dropShadow)"/>
+  </g>
+
+  <!-- Transition arrow -->
+  <line x1="218" y1="195" x2="262" y2="195" stroke="#4063D8" stroke-width="5" marker-end="url(#arrowhead)"/>
+
+  <!-- Right network (t) -->
+  <g transform="translate(280, 80) scale(1.6)">
+    <!-- Edges: persisted + newly formed -->
+    <line x1="0" y1="0" x2="50" y2="45" stroke="#389826" stroke-width="4"/>
+    <line x1="0" y1="0" x2="0" y2="90" stroke="#9558B2" stroke-width="4"/>
+    <!-- New edges (dashed) -->
+    <line x1="50" y1="45" x2="0" y2="90" stroke="#389826" stroke-width="3.5" stroke-dasharray="4,3"/>
+    <line x1="0" y1="0" x2="50" y2="90" stroke="#4063D8" stroke-width="3.5" stroke-dasharray="5,3"/>
+
+    <!-- Nodes -->
+    <circle cx="0" cy="0" r="14" fill="url(#grad-purple)" filter="url(#dropShadow)"/>
+    <circle cx="50" cy="45" r="14" fill="url(#grad-red)" filter="url(#dropShadow)"/>
+    <circle cx="0" cy="90" r="14" fill="url(#grad-green)" filter="url(#dropShadow)"/>
+  </g>
+
+  <!-- Time labels -->
+  <text x="138" y="68" font-family="sans-serif" font-size="22" font-weight="bold" fill="#9558B2" text-anchor="middle">t-1</text>
+  <text x="348" y="68" font-family="sans-serif" font-size="22" font-weight="bold" fill="#CB3C33" text-anchor="middle">t</text>
+
+  <!-- Formation/Dissolution labels -->
+  <text x="240" y="148" font-family="sans-serif" font-size="16" fill="#389826" text-anchor="middle">+form</text>
+  <text x="240" y="168" font-family="sans-serif" font-size="16" fill="#CB3C33" text-anchor="middle">-diss</text>
+
+  <!-- Text "TERGM.jl" -->
+  <g transform="translate(256, 440)" text-anchor="middle" font-family="sans-serif" font-weight="900" font-size="72" letter-spacing="2">
+    <!-- T: Purple -->
+    <text x="-155" y="0" fill="#9558B2" filter="url(#dropShadow)">T</text>
+    <!-- E: Red -->
+    <text x="-105" y="0" fill="#CB3C33" filter="url(#dropShadow)">E</text>
+    <!-- R: Green -->
+    <text x="-55" y="0" fill="#389826" filter="url(#dropShadow)">R</text>
+    <!-- G: Purple -->
+    <text x="0" y="0" fill="#9558B2" filter="url(#dropShadow)">G</text>
+    <!-- M: Red -->
+    <text x="55" y="0" fill="#CB3C33" filter="url(#dropShadow)">M</text>
+    <!-- .: Dark Grey -->
+    <text x="100" y="0" fill="#555555">.</text>
+    <!-- j: Green -->
+    <text x="120" y="0" fill="#389826" filter="url(#dropShadow)">j</text>
+    <!-- l: Purple -->
+    <text x="148" y="0" fill="#9558B2" filter="url(#dropShadow)">l</text>
+  </g>
+
+</svg>
