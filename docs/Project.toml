@@ -1,9 +1,15 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+ERGM = "c3d4e5f6-a7b8-9012-cdef-345678901234"
+Network = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+NetworkDynamic = "d4e5f6a7-b8c9-0123-def4-567890123456"
 TERGM = "e5f6a7b8-c9d0-1234-ef56-789012345678"
 
 [sources]
 TERGM = {path = ".."}
+ERGM = {url = "https://github.com/statistical-network-analysis-with-Julia/ERGM.jl.git"}
+Network = {url = "https://github.com/statistical-network-analysis-with-Julia/Network.jl.git"}
+NetworkDynamic = {url = "https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl.git"}
 
 [compat]
 Documenter = "1"
