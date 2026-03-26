@@ -1,9 +1,9 @@
 # TERGM.jl
 
-[![Network Analysis](https://img.shields.io/badge/Network-Analysis-orange.svg)](https://github.com/Statistical-network-analysis-with-Julia/TERGM.jl)
-[![Build Status](https://github.com/Statistical-network-analysis-with-Julia/TERGM.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/Statistical-network-analysis-with-Julia/TERGM.jl/actions/workflows/CI.yml?query=branch%3Amain)
-[![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://Statistical-network-analysis-with-Julia.github.io/TERGM.jl/stable/)
-[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://Statistical-network-analysis-with-Julia.github.io/TERGM.jl/dev/)
+[![Network Analysis](https://img.shields.io/badge/Network-Analysis-orange.svg)](https://github.com/statistical-network-analysis-with-Julia/TERGM.jl)
+[![Build Status](https://github.com/statistical-network-analysis-with-Julia/TERGM.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/statistical-network-analysis-with-Julia/TERGM.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://statistical-network-analysis-with-Julia.github.io/TERGM.jl/stable/)
+[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://statistical-network-analysis-with-Julia.github.io/TERGM.jl/dev/)
 [![Julia](https://img.shields.io/badge/Julia-1.9+-purple.svg)](https://julialang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -28,7 +28,7 @@ TERGM.jl is a port of the R [tergm](https://cran.r-project.org/package=tergm) pa
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/Statistical-network-analysis-with-Julia/TERGM.jl")
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/TERGM.jl")
 ```
 
 ## Temporal Terms Implemented
@@ -192,8 +192,8 @@ include("test/runtests.jl")
 
 For more detailed documentation, see:
 
-- [Stable Documentation](https://Statistical-network-analysis-with-Julia.github.io/TERGM.jl/stable/)
-- [Development Documentation](https://Statistical-network-analysis-with-Julia.github.io/TERGM.jl/dev/)
+- [Stable Documentation](https://statistical-network-analysis-with-Julia.github.io/TERGM.jl/stable/)
+- [Development Documentation](https://statistical-network-analysis-with-Julia.github.io/TERGM.jl/dev/)
 
 ## References
 
