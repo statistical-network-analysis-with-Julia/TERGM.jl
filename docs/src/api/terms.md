@@ -1,67 +1,12 @@
-# Terms API Reference
-
-This page documents all temporal terms available in TERGM.jl.
-
-## Edge Dynamics Terms
-
-### EdgeStability
+# Terms and Auxiliary Networks
 
 ```@docs
 EdgeStability
-```
-
-### PersistentEdge
-
-```@docs
-PersistentEdge
-```
-
-### NewEdge
-
-```@docs
-NewEdge
-```
-
-## Memory Terms
-
-### Memory
-
-```@docs
-Memory
-```
-
-### EdgeAge
-
-```@docs
-EdgeAge
-```
-
-## Reciprocity Terms
-
-### Delrecip
-
-```@docs
 Delrecip
-```
-
-## Lagged Terms
-
-### TimeLag
-
-```@docs
-TimeLag
-```
-
-## Wrappers
-
-### FormationTerm
-
-```@docs
-FormationTerm
-```
-
-### DissolutionTerm
-
-```@docs
-DissolutionTerm
+PersistentEdge
+NewEdge
+formation_network
+dissolution_network
+edge_ages
+mean_edge_age
 ```

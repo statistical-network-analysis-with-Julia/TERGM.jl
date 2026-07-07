@@ -16,26 +16,25 @@ TERGM.jl is a Julia port of the R [tergm](https://cran.r-project.org/package=ter
 
 The entire package lives in a single file: `src/TERGM.jl`. It is organized into four sections:
 
-1. **Temporal Term Types** -- `TemporalTerm <: AbstractERGMTerm` subtypes: `FormationTerm`, `DissolutionTerm`, `EdgeStability`, `PersistentEdge`, `NewEdge`, `Memory`, `EdgeAge`, `Delrecip`, `TimeLag`. Each implements `name()`, `compute()`, and optionally `change_stat()`.
+1. **Temporal Term Types** -- `TemporalTerm <: AbstractERGMTerm` subtypes: `EdgeStability`, `Delrecip`, `PersistentEdge`, `NewEdge`. Each implements `compute(term, net, prev_net)` and `change_stat(term, net, i, j, prev_net)` (ADD-DIRECTION, state-independent; calling without prev_net raises an informative error). Standard ERGM.jl terms mix freely (dispatch via `_tchange`/`_tcompute`). Tie-duration descriptives: `edge_ages`, `mean_edge_age`. The old `FormationTerm`/`DissolutionTerm` wrappers and Memory/EdgeAge/TimeLag stubs were removed — the formation/dissolution split is expressed by which term list a term is in.
 2. **STERGM Model Types** -- `STERGM` (formula holding formation/dissolution terms), `STERGMModel` (formula + observed network sequence), `STERGMResult` (fitted coefficients, SEs, convergence info).
-3. **Estimation Functions** -- `stergm()` dispatches to `cmle()`, `cmple()`, or `egmme()`. CMLE uses Newton-Raphson on logistic change-stat likelihoods. CMPLE currently delegates to CMLE. EGMME is experimental/placeholder.
-4. **Simulation & Diagnostics** -- `simulate_stergm()`, `simulate_one_step()`, `simulate_network_sequence()`, and `stergm_gof()`.
+3. **Estimation** -- `stergm()` defaults to `cmple()`: pooled logistic pseudo-likelihood over the FREE DYADS of the auxiliary networks (formation rows = prior non-edges with stats on Y⁺ = Y_{t−1} ∪ Y_t; dissolution rows = prior edges with stats on Y⁻ = Y_{t−1} ∩ Y_t; `formation_network`/`dissolution_network` expose the construction). `cmle` warns and falls back to CMPLE (exact only for dyad-independent terms; MCMC CMLE not implemented). `egmme` raises an error instead of returning placeholders.
+4. **Simulation & Diagnostics** -- `simulate_stergm()` samples Y⁺ (Metropolis over prior non-edges) and Y⁻ (over prior edges) and combines Y_t = (Y⁺ \\ Y_{t−1}) ∪ Y⁻; `simulate_network_sequence()` iterates; `stergm_gof()` compares formed/persisted tie counts per transition with MC p-values.
 
-The main entry point is `stergm(networks, formation_terms, dissolution_terms; method=:cmle)`.
+The main entry point is `stergm(networks, formation_terms, dissolution_terms; method=:cmple)`.
 
 ## Key Dependencies
 
 - **ERGM.jl** -- provides `AbstractERGMTerm`, standard ERGM terms (`Edges`, `Triangle`, `Mutual`), and `change_stat`/`compute` interface
 - **Network.jl** -- network data structure (`Network{T}`), `has_edge`, `add_edge!`, `rem_edge!`, `nv`, `ne`, `edges`, `is_directed`
-- **NetworkDynamic.jl** -- dynamic network support
-- **Optim.jl**, **Distributions.jl**, **StatsBase.jl** -- numerical optimization and statistics
+- **Distributions.jl** -- distribution utilities
 
-Requires Julia 1.9+.
+Requires Julia 1.12+.
 
 ## Conventions
 
 - All temporal terms subtype `TemporalTerm <: AbstractERGMTerm` and must implement `name()` and `compute(term, net, prev_net)`.
-- Change statistics follow the ERGM.jl convention: `change_stat(term, net, i, j)` returns the change in the statistic when toggling edge (i,j). Temporal variants accept an additional `prev_net` argument.
+- Change statistics follow the ERGM.jl ADD-DIRECTION convention: `change_stat(term, net, i, j)` = g(y⁺ij) − g(y⁻ij), state-independent. Temporal variants take a trailing `prev_net` argument and obey the same convention (brute-force verified in tests).
 - Formation terms operate on dyads that were non-edges at t-1; dissolution terms operate on dyads that were edges at t-1.
 - The dissolution model estimates **persistence** (not dissolution) coefficients -- positive values mean higher persistence.
 - The package uses `Float64` for all coefficients and statistics.

@@ -1,209 +1,83 @@
 # TERGM.jl
 
+
 [![Network Analysis](https://img.shields.io/badge/Network-Analysis-orange.svg)](https://github.com/statistical-network-analysis-with-Julia/TERGM.jl)
 [![Build Status](https://github.com/statistical-network-analysis-with-Julia/TERGM.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/statistical-network-analysis-with-Julia/TERGM.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://statistical-network-analysis-with-Julia.github.io/TERGM.jl/stable/)
 [![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://statistical-network-analysis-with-Julia.github.io/TERGM.jl/dev/)
-[![Julia](https://img.shields.io/badge/Julia-1.9+-purple.svg)](https://julialang.org/)
+[![Julia](https://img.shields.io/badge/Julia-1.12+-purple.svg)](https://julialang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 <p align="center">
   <img src="docs/src/assets/logo.svg" alt="TERGM.jl icon" width="160">
 </p>
 
-A Julia implementation of **Temporal Exponential Random Graph Models** for statistical modeling of dynamic networks using Separable Temporal ERGMs (STERGMs).
+Separable Temporal ERGMs (STERGM) in Julia — a port of the R `tergm`
+package (Krivitsky & Handcock 2014).
 
-## Overview
+## The separable model
 
-Temporal ERGMs extend the ERGM framework to dynamic networks observed at multiple time points. TERGM.jl focuses on the Separable Temporal ERGM (STERGM), which decomposes network change into two separate processes:
+Each transition Y_{t−1} → Y_t factors into:
 
-- **Formation effects**: What drives new tie creation (reciprocity, triadic closure, homophily)
-- **Dissolution effects**: What drives tie persistence (mutual ties, edge stability, memory)
-- **Temporal effects**: Edge stability, delayed reciprocity, memory, edge age
-- **Standard ERGM terms**: Use any ERGM.jl term in formation or dissolution models
+- a **formation** model on the formation network **Y⁺ = Y_{t−1} ∪ Y_t**
+  (free dyads: the non-edges of Y_{t−1});
+- a **dissolution** model on the dissolution network **Y⁻ = Y_{t−1} ∩ Y_t**
+  (free dyads: the edges of Y_{t−1}), parameterized as **persistence** —
+  positive coefficients mean ties last longer.
 
-TERGM.jl is a port of the R [tergm](https://cran.r-project.org/package=tergm) package from the [StatNet](https://statnet.org/) collection.
+`formation_network` / `dissolution_network` expose the auxiliary
+construction directly. Formation and dissolution models take any mix of
+standard ERGM.jl terms (evaluated on Y⁺/Y⁻) and temporal terms
+(`EdgeStability`, `Delrecip`, `PersistentEdge`, `NewEdge`) that also
+condition on Y_{t−1}.
 
-## Installation
-
-```julia
-using Pkg
-Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/TERGM.jl")
-```
-
-## Temporal Terms Implemented
-
-### 1. Edge Dynamics Terms
-
-Terms capturing edge persistence and formation between time points.
+## Quick Start
 
 ```julia
-EdgeStability()      # Edges persisting from previous time step
-PersistentEdge()     # Same as EdgeStability
-NewEdge()            # Edges not present at previous time step
-```
+using TERGM, ERGM, Network
 
-### 2. Memory Terms
+networks = [net_t0, net_t1, net_t2]   # panel of same-sized Networks
 
-Terms capturing memory effects and edge age.
-
-```julia
-Memory(theta)        # Weighted memory of previous state
-EdgeAge()            # Age of edges (how many time steps persisted)
-EdgeAge(max_age=5)   # Cap age at 5 time steps
-```
-
-### 3. Reciprocity Terms
-
-Terms capturing delayed reciprocity across time.
-
-```julia
-Delrecip()           # Delayed reciprocity (reciprocate previous edges)
-```
-
-### 4. Lagged Terms
-
-Apply standard ERGM terms to the previous network.
-
-```julia
-TimeLag(Edges())     # Lagged edge count
-TimeLag(Triangle())  # Lagged triangle count
-```
-
-### 5. Formation/Dissolution Wrappers
-
-Wrap standard ERGM terms for specific sub-models.
-
-```julia
-FormationTerm(Edges())      # Apply only to formation
-DissolutionTerm(Edges())    # Apply only to dissolution
-```
-
-## Usage
-
-### Basic Example
-
-```julia
-using Network
-using ERGM
-using TERGM
-
-# Network sequence (panel data at 4 time points)
-networks = [net_t1, net_t2, net_t3, net_t4]
-
-# Define formation and dissolution terms
-form_terms = [Edges(), Triangle()]
-diss_terms = [Edges()]
-
-# Fit STERGM via Conditional Maximum Likelihood
-result = stergm(networks, form_terms, diss_terms)
-
-# View results
+result = stergm(networks,
+                [Edges(), Mutual()],       # formation model
+                [Edges()])                 # dissolution (persistence) model
 println(result)
+
+# Simulate forward from the last panel
+future = simulate_stergm(result, 10)
+
+# Transition-level goodness of fit
+stergm_gof(result; n_sim = 100)
 ```
 
-### Result Structure
+## Estimation
 
-The `stergm` function returns a `STERGMResult` with:
+The default (and honest) estimator is **CMPLE**: pooled logistic
+pseudo-likelihood over the free dyads of the auxiliary networks. For
+dyad-independent terms this *is* the conditional MLE; for dyad-dependent
+terms (`Triangle`, `Mutual`, ...) it is an approximation — `method =
+:cmle` warns and falls back to CMPLE (MCMC-based CMLE is not
+implemented), and `method = :egmme` raises an error rather than
+fabricating estimates.
 
-- `formation_coef::Vector{Float64}`: Formation coefficients (log-odds of edge formation)
-- `dissolution_coef::Vector{Float64}`: Dissolution coefficients (log-odds of edge persistence)
-- `formation_se::Vector{Float64}`: Standard errors for formation model
-- `dissolution_se::Vector{Float64}`: Standard errors for dissolution model
-- `method::Symbol`: Estimation method used
-- `converged::Bool`: Whether optimization converged
+An edges-only model reproduces the analytic formation/persistence
+log-odds exactly, and simulation→estimation round trips recover both
+coefficient vectors (tested).
 
-```julia
-# Access results
-result.formation_coef    # Formation coefficients
-result.dissolution_coef  # Dissolution (persistence) coefficients
-result.formation_se      # Formation standard errors
-result.dissolution_se    # Dissolution standard errors
-```
+## Temporal descriptives
 
-### Estimation Methods
-
-TERGM.jl supports multiple estimation methods:
-
-```julia
-# Conditional Maximum Likelihood (default, recommended)
-result = stergm(networks, form_terms, diss_terms; method=:cmle)
-
-# Conditional Maximum Pseudo-Likelihood (faster for large networks)
-result = stergm(networks, form_terms, diss_terms; method=:cmple)
-
-# Equilibrium Generalized Method of Moments (experimental)
-result = stergm(networks, form_terms, diss_terms; method=:egmme)
-```
-
-### Simulation
-
-Generate future network trajectories from fitted models:
-
-```julia
-# Simulate 10 future time steps
-future_nets = simulate_stergm(result, 10)
-
-# With burn-in period
-future_nets = simulate_stergm(result, 10; burnin=100)
-
-# Simulate from specified parameters
-nets = simulate_network_sequence(
-    formula, init_net, n_steps;
-    form_coef=[-3.0, 1.0],
-    diss_coef=[2.0]
-)
-```
-
-### Goodness-of-Fit
-
-Assess model fit by comparing observed and simulated network statistics:
-
-```julia
-gof = stergm_gof(result; n_sim=100)
-println("Observed: ", gof.observed)
-println("Simulated mean: ", gof.simulated_mean)
-println("Z-scores: ", gof.z_scores)
-```
-
-### Example: Email Communication
-
-```julia
-# Weekly email networks
-weeks = [email_week1, email_week2, email_week3, email_week4]
-
-# Model: edges form/dissolve based on density and reciprocity
-form = [Edges(), Mutual()]
-diss = [Edges(), Mutual()]
-
-result = stergm(weeks, form, diss)
-
-# Positive formation mutual coefficient → reciprocity increases formation
-# Positive dissolution mutual coefficient → reciprocity increases persistence
-```
-
-## Running Tests
-
-```julia
-include("test/runtests.jl")
-```
-
-## Documentation
-
-For more detailed documentation, see:
-
-- [Stable Documentation](https://statistical-network-analysis-with-Julia.github.io/TERGM.jl/stable/)
-- [Development Documentation](https://statistical-network-analysis-with-Julia.github.io/TERGM.jl/dev/)
+`edge_ages(networks)` / `mean_edge_age(networks)` report how long the
+final panel's ties have been in place.
 
 ## References
 
-1. Krivitsky, P. N., & Handcock, M. S. (2014). A separable model for dynamic networks. *Journal of the Royal Statistical Society: Series B*, 76(1), 29-46.
+1. Krivitsky, P.N. & Handcock, M.S. (2014). A separable model for dynamic
+   networks. *JRSS-B*, 76(1), 29-46.
 
-2. Krivitsky, P. N., & Handcock, M. S. (2023). Modeling of dynamic networks based on egocentric data with durational information. *Sociological Methodology*, 53(2), 250-286.
-
-3. Robins, G., & Pattison, P. (2001). Random graph models for temporal processes in social networks. *Journal of Mathematical Sociology*, 25(1), 5-41.
-
-4. Hanneke, S., Fu, W., & Xing, E. P. (2010). Discrete temporal models of social networks. *Electronic Journal of Statistics*, 4, 585-605.
+2. Krivitsky, P.N. & Handcock, M.S. tergm: Fit, Simulate and Diagnose
+   Models for Network Evolution Based on Exponential-Family Random Graph
+   Models. R package.
+   [https://cran.r-project.org/package=tergm](https://cran.r-project.org/package=tergm)
 
 ## License
 
