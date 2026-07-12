@@ -22,6 +22,30 @@ function fixture_panels()
     return [t0, t1]
 end
 
+# T-panel directed sequence on n actors with planted persistence
+function random_panels(rng; n::Int=10, T::Int=5, p0::Float64=0.15,
+                       p_diss::Float64=0.3, p_form::Float64=0.08)
+    panels = Network.Network{Int}[]
+    net = network(n)
+    for i in 1:n, j in 1:n
+        i != j && rand(rng) < p0 && add_edge!(net, i, j)
+    end
+    push!(panels, net)
+    for _ in 2:T
+        nxt = TERGM._copy_net(panels[end])
+        for i in 1:n, j in 1:n
+            i == j && continue
+            if has_edge(panels[end], i, j)
+                rand(rng) < p_diss && rem_edge!(nxt, i, j)
+            elseif rand(rng) < p_form
+                add_edge!(nxt, i, j)
+            end
+        end
+        push!(panels, nxt)
+    end
+    return panels
+end
+
 @testset "TERGM.jl" begin
     @testset "Auxiliary networks (Krivitsky-Handcock)" begin
         nets = fixture_panels()
@@ -104,6 +128,49 @@ end
         @test isfinite(result.loglik_formation)
         @test isfinite(result.loglik_dissolution)
         @test all(result.formation_se .> 0)
+    end
+
+    @testset "Auxiliary networks preserve attributes; nodal terms estimable" begin
+        # Regression: _copy_net/dissolution_network used to drop vertex
+        # attributes, so nodal terms (NodeMatch, ...) in formation and
+        # dissolution formulas produced all-zero design-matrix columns
+        rng = Random.Xoshiro(7)
+        n = 10
+        t0 = network(n)
+        set_vertex_attribute!(t0, :group,
+                              Dict(v => (v <= 5 ? "a" : "b") for v in 1:n))
+        for i in 1:n, j in 1:n
+            i != j && rand(rng) < 0.1 && add_edge!(t0, i, j)
+        end
+        # Planted homophily: same-group ties form readily, cross-group rarely
+        t1 = copy(t0)
+        for i in 1:n, j in 1:n
+            (i == j || has_edge(t0, i, j)) && continue
+            same = (i <= 5) == (j <= 5)
+            rand(rng) < (same ? 0.7 : 0.05) && add_edge!(t1, i, j)
+        end
+
+        # Y⁺ and Y⁻ carry the vertex attributes
+        yplus = formation_network(t0, t1)
+        yminus = dissolution_network(t0, t1)
+        @test get_vertex_attribute(yplus, :group, 1) == "a"
+        @test get_vertex_attribute(yminus, :group, 6) == "b"
+
+        # The nodal term's design-matrix column — NodeMatch change stats on
+        # Y⁺ over the formation-free dyads — must not be identically zero
+        col = [change_stat(NodeMatch(:group), yplus, i, j)
+               for i in 1:n for j in 1:n if i != j && !has_edge(t0, i, j)]
+        @test any(!iszero, col)
+
+        # CMPLE recovers the planted homophily sign
+        result = stergm([t0, t1], [Edges(), NodeMatch(:group)], [Edges()])
+        @test result.converged
+        @test result.formation_coef[2] > 0
+
+        # Simulated transitions carry attributes forward too
+        yt = simulate_stergm(t1, STERGM([Edges()], [Edges()]), [-1.0], [0.5];
+                             burnin=500, rng=rng)
+        @test get_vertex_attribute(yt, :group, 3) == "a"
     end
 
     @testset "Temporal and dyad-dependent terms are estimable" begin
@@ -199,14 +266,172 @@ end
         nets = fixture_panels()
         result = stergm(nets, [Edges()], [Edges()])
 
-        g = stergm_gof(result; n_sim=30, rng=rng)
-        @test g.n_sim == 30
-        @test g.observed.formed == 2.0
-        @test g.observed.persisted == 2.0
-        @test 0.0 <= g.p_values.formed <= 1.0
+        g = gof(result; n_sim=30, rng=rng)
+
+        # gof extends Network.jl's shared generic and returns the shared
+        # GOFResult container; stergm_gof remains as an alias
+        @test stergm_gof === gof
+        @test g isa GOFResult
+        @test n_simulations(g) == 30
+        stat = only(g.statistics)
+        @test stat.labels == ["formed", "persisted"]
+        @test stat.observed == [2.0, 2.0]
+        @test all(0.0 .< stat.p_values .<= 1.0)
         # The saturated edges-only model should fit its own data
-        @test g.p_values.formed > 0.01
-        @test g.p_values.persisted > 0.01
+        @test stat.p_values[1] > 0.01
+        @test stat.p_values[2] > 0.01
+
+        # ... and renders through the shared formatted display
+        out = sprint(show, g)
+        @test occursin("Goodness-of-fit assessment: STERGM", out)
+        @test occursin("MC p-value", out)
+    end
+
+    @testset "StatsAPI accessors" begin
+        nets = fixture_panels()
+        r = stergm(nets, [Edges()], [Edges()])
+
+        @test coef(r) == vcat(r.formation_coef, r.dissolution_coef)
+        @test stderror(r) == vcat(r.formation_se, r.dissolution_se)
+        V = vcov(r)
+        @test size(V) == (2, 2)
+        @test V[1, 2] == 0.0  # separable → block-diagonal
+        @test sqrt(V[1, 1]) ≈ r.formation_se[1]
+        @test sqrt(V[2, 2]) ≈ r.dissolution_se[1]
+        @test loglikelihood(r) ≈ r.loglik_formation + r.loglik_dissolution
+        @test dof(r) == 2
+        @test nobs(r) == 20  # 5·4 ordered dyads × 1 transition
+        @test aic(r) ≈ -2 * loglikelihood(r) + 4
+        @test bic(r) ≈ -2 * loglikelihood(r) + 2 * log(20)
+    end
+
+    @testset "Formula validation at model construction" begin
+        nets = fixture_panels()
+
+        # Attribute-based term whose attribute is missing → ArgumentError
+        # listing the available attributes
+        err = try
+            STERGMModel(STERGM([Edges(), NodeMatch(:group)], [Edges()]), nets)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin(":group", err.msg)
+        @test occursin("Available vertex attributes", err.msg)
+        @test occursin("formation", err.msg)
+
+        # ... and the same through the stergm() entry point, on the
+        # dissolution side
+        err2 = try
+            stergm(nets, [Edges()], [Edges(), NodeCov(:wealth)])
+            nothing
+        catch e
+            e
+        end
+        @test err2 isa ArgumentError
+        @test occursin("dissolution", err2.msg)
+        @test occursin(":wealth", err2.msg)
+
+        # Attribute present on every panel → constructs (and lists it when
+        # another attribute is missing)
+        for net in nets
+            set_vertex_attribute!(net, :grp,
+                                  Dict(v => (v <= 2 ? "a" : "b") for v in 1:5))
+        end
+        @test STERGMModel(STERGM([Edges(), NodeMatch(:grp)], [Edges()]),
+                          nets) isa STERGMModel
+        err3 = try
+            STERGMModel(STERGM([Edges(), NodeMatch(:other)], [Edges()]), nets)
+            nothing
+        catch e
+            e
+        end
+        @test err3 isa ArgumentError
+        @test occursin(":grp", err3.msg)
+
+        # Direction-incompatible terms on undirected panels are rejected
+        un = [network(4; directed=false), network(4; directed=false)]
+        @test_throws ArgumentError STERGMModel(
+            STERGM([Edges()], [Edges(), Mutual()]), un)
+        @test_throws ArgumentError STERGMModel(
+            STERGM([Edges(), Delrecip()], [Edges()]), un)
+        # ... but accepted on directed panels
+        @test STERGMModel(STERGM([Edges(), Delrecip()], [Edges(), Mutual()]),
+                          fixture_panels()) isa STERGMModel
+    end
+
+    @testset "Per-transition block-bootstrap SEs (btergm-style)" begin
+        panels = random_panels(Random.Xoshiro(99))
+
+        r_h = stergm(panels, [Edges()], [Edges()])
+        r_b = stergm(panels, [Edges()], [Edges()];
+                     se=:bootstrap, n_boot=60, rng=Random.Xoshiro(1))
+
+        # Bootstrap changes only the uncertainty, not the point estimates
+        @test r_b.formation_coef == r_h.formation_coef
+        @test r_b.dissolution_coef == r_h.dissolution_coef
+        @test r_h.se_type == :hessian
+        @test r_b.se_type == :bootstrap
+
+        @test all(isfinite, stderror(r_b))
+        @test all(stderror(r_b) .> 0)
+        V = vcov(r_b)
+        @test size(V) == (2, 2)
+        @test V ≈ V'
+        @test sqrt(V[1, 1]) ≈ r_b.formation_se[1]
+        @test sqrt(V[2, 2]) ≈ r_b.dissolution_se[1]
+
+        # Reproducible under the same rng seed
+        r_b2 = stergm(panels, [Edges()], [Edges()];
+                      se=:bootstrap, n_boot=60, rng=Random.Xoshiro(1))
+        @test stderror(r_b2) == stderror(r_b)
+
+        # Resampling transitions needs at least two of them
+        @test_throws ArgumentError stergm(fixture_panels(), [Edges()], [Edges()];
+                                          se=:bootstrap)
+        # Unknown se choice fails loudly
+        @test_throws ArgumentError stergm(panels, [Edges()], [Edges()];
+                                          se=:jackknife)
+        @test_throws ArgumentError stergm(panels, [Edges()], [Edges()];
+                                          se=:bootstrap, n_boot=1)
+    end
+
+    @testset "Dyad-dependence caveat in show()" begin
+        # Temporal terms condition only on the exogenous previous network
+        @test !is_dyad_dependent(EdgeStability())
+        @test !is_dyad_dependent(Delrecip())
+        @test !is_dyad_dependent(PersistentEdge())
+        @test !is_dyad_dependent(NewEdge())
+        @test is_dyad_dependent(Mutual())
+
+        panels = random_panels(Random.Xoshiro(31))
+
+        # Dyad-dependent formula + naive SEs → warning with pointer to
+        # se=:bootstrap
+        r_dep = stergm(panels, [Edges()], [Edges(), Mutual()])
+        out = sprint(show, r_dep)
+        @test occursin("dyad-dependent", out)
+        @test occursin("anticonservative", out)
+        @test occursin("se=:bootstrap", out)
+
+        # Both blocks render through the shared Network.jl coefficient
+        # printer (R-style columns, one significance-code legend)
+        @test occursin("Formation:", out)
+        @test occursin("Dissolution (persistence):", out)
+        @test count("Pr(>|z|)", out) == 2
+        @test count("Signif. codes:", out) == 1
+
+        # Dyad-independent formula (incl. temporal terms) → no caveat
+        r_ind = stergm(panels, [Edges(), Delrecip()], [Edges()])
+        @test !occursin("dyad-dependent", sprint(show, r_ind))
+
+        # Bootstrap SEs → milder note, no anticonservative warning
+        r_boot = stergm(panels, [Edges()], [Edges(), Mutual()];
+                        se=:bootstrap, n_boot=30, rng=Random.Xoshiro(7))
+        ob = sprint(show, r_boot)
+        @test occursin("block-bootstrap", ob)
+        @test !occursin("anticonservative", ob)
     end
 
     @testset "Input validation" begin

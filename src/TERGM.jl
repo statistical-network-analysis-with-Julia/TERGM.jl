@@ -30,7 +30,14 @@ using Network
 using Random
 using Statistics
 
-import ERGM: name, compute, change_stat
+import ERGM: name, compute, change_stat, is_dyad_dependent, newton_fit
+import StatsAPI
+import StatsAPI: coef, stderror, vcov, loglikelihood, aic, bic, nobs, dof
+
+# `gof` extends the ONE shared Network.jl generic (every model package adds
+# methods for its own result types), so `gof(fit)` works uniformly across the
+# ecosystem and loading several model packages never collides on the name.
+import Network: gof
 
 # Model types
 export STERGM, STERGMResult, STERGMModel
@@ -47,11 +54,15 @@ export stergm, fit_stergm, cmple, cmle, egmme
 # Simulation
 export simulate_stergm, simulate_network_sequence
 
-# Diagnostics
-export stergm_gof
+# Diagnostics (`gof` is Network.jl's shared generic, extended with a method
+# for STERGMResult; `stergm_gof` is kept as a backward-compatible alias)
+export gof, stergm_gof
 
 # Temporal descriptives
 export edge_ages, mean_edge_age
+
+# StatsAPI methods (re-exported so `coef(fit)` etc. work with just `using TERGM`)
+export coef, stderror, vcov, loglikelihood, aic, bic, nobs, dof
 
 # =============================================================================
 # Temporal Terms
@@ -180,6 +191,20 @@ end
 change_stat(::NewEdge, net, i::Int, j::Int, prev_net) =
     has_edge(prev_net, i, j) ? 0.0 : 1.0
 
+# Dependence classification (extends ERGM.is_dyad_dependent, whose fallback
+# is the conservative `true`): the built-in temporal terms condition only on
+# the *previous* network, which is exogenous within a transition, so their
+# change statistics do not depend on other dyads of the current network.
+is_dyad_dependent(::EdgeStability) = false
+is_dyad_dependent(::Delrecip) = false
+is_dyad_dependent(::PersistentEdge) = false
+is_dyad_dependent(::NewEdge) = false
+
+# Delayed reciprocity is only meaningful on directed networks; extend
+# ERGM.jl's direction trait so model construction rejects it on undirected
+# panels (like `Mutual`).
+ERGM._requires_directed(::Delrecip) = true
+
 # =============================================================================
 # Temporal descriptives
 # =============================================================================
@@ -221,13 +246,11 @@ end
 # Auxiliary networks (Krivitsky & Handcock construction)
 # =============================================================================
 
-function _copy_net(net::Network{T}) where T
-    c = Network{T}(; n=Int(nv(net)), directed=is_directed(net))
-    for e in edges(net)
-        add_edge!(c, src(e), dst(e))
-    end
-    return c
-end
+# Attribute-preserving copy: delegates to `Base.copy(::Network)`, which
+# duplicates the graph and all vertex/edge/network attributes, so nodal
+# terms (NodeMatch, NodeCov, ...) in formation/dissolution formulas keep
+# seeing covariates on the auxiliary networks.
+_copy_net(net::Network) = copy(net)
 
 """
     formation_network(prev_net, curr_net) -> Network
@@ -250,10 +273,10 @@ The dissolution network Y⁻ = Y_{t-1} ∩ Y_t. Dissolution (persistence)
 statistics are evaluated on Y⁻; its free dyads are the edges of Y_{t-1}.
 """
 function dissolution_network(prev_net::Network, curr_net::Network)
-    yminus = Network{Int}(; n=Int(nv(prev_net)), directed=is_directed(prev_net))
+    yminus = _copy_net(prev_net)
     for e in edges(prev_net)
-        if has_edge(curr_net, src(e), dst(e))
-            add_edge!(yminus, src(e), dst(e))
+        if !has_edge(curr_net, src(e), dst(e))
+            rem_edge!(yminus, src(e), dst(e))
         end
     end
     return yminus
@@ -284,16 +307,55 @@ struct STERGM
     end
 end
 
+# Formula validation at model construction, mirroring ERGM.jl's
+# `ERGMModel` checks (its `_validate_formula` helper is internal, so the
+# two checks are replicated here on top of the term traits ERGM.jl defines
+# as extension points): attribute-based terms must reference a vertex
+# attribute that exists on every panel, and direction-incompatible terms
+# (`Mutual`, `Delrecip`, ...) are rejected on undirected panels. Failing
+# loudly here prevents silently wrong fits from all-zero design columns.
+function _validate_terms(terms::Vector{AbstractERGMTerm}, networks, side::String)
+    for term in terms
+        attr = ERGM._vertex_attribute(term)
+        if attr !== nothing
+            for (t, net) in enumerate(networks)
+                available = list_vertex_attributes(net)
+                if !(attr in available)
+                    avail_str = isempty(available) ? "(none)" :
+                        join(sort!([":" * String(a) for a in available]), ", ")
+                    throw(ArgumentError(
+                        "$side term '$(name(term))' refers to vertex attribute " *
+                        ":$attr, which does not exist on panel $t. Available " *
+                        "vertex attributes: $avail_str."))
+                end
+            end
+        end
+        if ERGM._requires_directed(term) && !is_directed(networks[1])
+            throw(ArgumentError(
+                "$side term '$(name(term))' is only defined for directed " *
+                "networks, but the panels are undirected. Remove the term or " *
+                "use directed panels."))
+        end
+    end
+    return nothing
+end
+
 """
     STERGMModel
 
 A STERGM formula bound to an observed network panel.
+
+Construction validates the formula against the panels — every
+attribute-based term's vertex attribute must exist on each panel, and
+direction-incompatible terms (`Mutual`, `Delrecip`, ...) are rejected on
+undirected panels — throwing an `ArgumentError` otherwise (mirroring
+`ERGM.ERGMModel`).
 """
 struct STERGMModel{T}
     formula::STERGM
     networks::Vector{Network{T}}
 
-    function STERGMModel(formula::STERGM, networks::Vector{Network{T}}) where T
+    function STERGMModel(formula::STERGM, networks::Vector{<:Network{T}}) where T
         length(networks) >= 2 ||
             throw(ArgumentError("need at least two panels (one transition)"))
         n = nv(networks[1])
@@ -302,6 +364,8 @@ struct STERGMModel{T}
             (nv(net) == n && is_directed(net) == dir) ||
                 throw(ArgumentError("all panels must share size and directedness"))
         end
+        _validate_terms(formula.formation, networks, "formation")
+        _validate_terms(formula.dissolution, networks, "dissolution")
         new{T}(formula, networks)
     end
 end
@@ -310,7 +374,13 @@ end
     STERGMResult
 
 Fitted STERGM. Dissolution coefficients are **persistence** log-odds.
-`loglik_*` are the maximized conditional pseudo-log-likelihoods.
+`loglik_*` are the maximized conditional pseudo-log-likelihoods. `vcov` is
+the joint covariance of the stacked (formation, then dissolution)
+coefficients — block-diagonal by separability for `se_type == :hessian`,
+the empirical bootstrap covariance for `se_type == :bootstrap`. `se_type`
+records how the standard errors were obtained (`:hessian` for the inverse
+observed pseudo-likelihood information, `:bootstrap` for the
+per-transition block bootstrap).
 """
 struct STERGMResult{T}
     model::STERGMModel{T}
@@ -318,11 +388,21 @@ struct STERGMResult{T}
     formation_se::Vector{Float64}
     dissolution_coef::Vector{Float64}
     dissolution_se::Vector{Float64}
+    vcov::Matrix{Float64}
     loglik_formation::Float64
     loglik_dissolution::Float64
     converged::Bool
     method::Symbol
+    se_type::Symbol
 end
+
+# Backward-compatible constructor from before `se_type` existed
+STERGMResult(model, formation_coef, formation_se, dissolution_coef,
+             dissolution_se, vcov, loglik_formation, loglik_dissolution,
+             converged, method::Symbol) =
+    STERGMResult(model, formation_coef, formation_se, dissolution_coef,
+                 dissolution_se, vcov, loglik_formation, loglik_dissolution,
+                 converged, method, :hessian)
 
 function Base.show(io::IO, r::STERGMResult)
     println(io, "STERGM Results ($(r.method))")
@@ -331,17 +411,64 @@ function Base.show(io::IO, r::STERGMResult)
     println(io, "Pseudo-log-likelihood: formation $(round(r.loglik_formation, digits=3)), " *
                 "dissolution $(round(r.loglik_dissolution, digits=3))")
     println(io)
+
+    # Shared ecosystem presentation layer (Network.print_coeftable): one
+    # R-style table per model, with the significance-code legend printed
+    # once below the second table
+    fz = r.formation_coef ./ r.formation_se
+    dz = r.dissolution_coef ./ r.dissolution_se
     println(io, "Formation:")
-    for (k, t) in enumerate(r.model.formula.formation)
-        println(io, "  $(rpad(name(t), 22)) $(lpad(round(r.formation_coef[k], digits=4), 10)) " *
-                    "(SE: $(round(r.formation_se[k], digits=4)))")
-    end
+    print_coeftable(io, name.(r.model.formula.formation), r.formation_coef,
+                    r.formation_se, ERGM._z_pvalues(fz);
+                    z_values=fz, legend=false)
+    println(io)
     println(io, "Dissolution (persistence):")
-    for (k, t) in enumerate(r.model.formula.dissolution)
-        println(io, "  $(rpad(name(t), 22)) $(lpad(round(r.dissolution_coef[k], digits=4), 10)) " *
-                    "(SE: $(round(r.dissolution_se[k], digits=4)))")
+    print_coeftable(io, name.(r.model.formula.dissolution), r.dissolution_coef,
+                    r.dissolution_se, ERGM._z_pvalues(dz); z_values=dz)
+
+    # Honest-uncertainty caveat (mirroring ERGM.jl's show): CMPLE fits of
+    # dyad-dependent formulas have suspect inverse-Hessian standard errors.
+    # Dyad-independent formulas need no caveat — there CMPLE is the CMLE.
+    if r.method in (:cmple, :cmle) &&
+       any(is_dyad_dependent(t)
+           for t in vcat(r.model.formula.formation, r.model.formula.dissolution))
+        println(io)
+        if r.se_type == :bootstrap
+            println(io, "Note: this model contains dyad-dependent terms and was fit by")
+            println(io, "conditional maximum pseudolikelihood (CMPLE). Standard errors are")
+            println(io, "per-transition block-bootstrap estimates; the CMPLE point estimates")
+            println(io, "may still be biased.")
+        else
+            println(io, "Warning: this model contains dyad-dependent terms and was fit by")
+            println(io, "conditional maximum pseudolikelihood (CMPLE). The standard errors")
+            println(io, "are based on the naive pseudolikelihood and are suspect (typically")
+            println(io, "anticonservative); the p-values should not be trusted. Use")
+            println(io, "se=:bootstrap for per-transition block-bootstrap standard errors.")
+        end
     end
 end
+
+# StatsAPI interface: methods on the shared statistics generics (mirroring
+# ERGM.jl), so fitted STERGMs interoperate with StatsBase/GLM-style tooling.
+# Coefficient-shaped accessors stack formation first, then dissolution.
+
+# Total number of free dyads pooled over transitions: every off-diagonal
+# dyad of each transition is free in exactly one of the two models
+function _n_free_dyads(model::STERGMModel)
+    n = Int(nv(model.networks[1]))
+    per = is_directed(model.networks[1]) ? n * (n - 1) : n * (n - 1) ÷ 2
+    return (length(model.networks) - 1) * per
+end
+
+StatsAPI.coef(r::STERGMResult) = vcat(r.formation_coef, r.dissolution_coef)
+StatsAPI.stderror(r::STERGMResult) = vcat(r.formation_se, r.dissolution_se)
+StatsAPI.vcov(r::STERGMResult) = r.vcov
+StatsAPI.loglikelihood(r::STERGMResult) = r.loglik_formation + r.loglik_dissolution
+StatsAPI.aic(r::STERGMResult) = -2 * loglikelihood(r) + 2 * dof(r)
+StatsAPI.bic(r::STERGMResult) = -2 * loglikelihood(r) + dof(r) * log(nobs(r))
+StatsAPI.nobs(r::STERGMResult) = _n_free_dyads(r.model)
+StatsAPI.dof(r::STERGMResult) =
+    length(r.formation_coef) + length(r.dissolution_coef)
 
 # =============================================================================
 # Estimation
@@ -358,6 +485,10 @@ Fit a STERGM to a panel of networks.
   an approximation for dyad-dependent terms (`Triangle`, ...).
 - `:cmle` — alias for `:cmple` with a one-time warning; MCMC-based exact
   CMLE is not implemented.
+
+Remaining keyword arguments are forwarded to [`cmple`](@ref) — in
+particular `se=:bootstrap` for per-transition block-bootstrap standard
+errors (with `n_boot` and `rng`).
 """
 function stergm(networks::Vector{<:Network},
                 formation::Vector{<:AbstractERGMTerm},
@@ -378,12 +509,13 @@ end
 
 const fit_stergm = stergm
 
-# Weighted logistic Newton-Raphson with step-halving; returns
-# (coef, se, loglik, converged)
+# Logistic pseudo-likelihood fit via the shared ERGM.newton_fit optimizer
+# (Newton–Raphson with step halving); returns (coef, se, vcov, loglik,
+# converged)
 function _logistic_fit(X::Matrix{Float64}, y::Vector{Bool};
                        maxiter::Int=100, tol::Float64=1e-8)
     n, p = size(X)
-    n > 0 || return (fill(NaN, p), fill(NaN, p), NaN, false)
+    n > 0 || return (fill(NaN, p), fill(NaN, p), fill(NaN, p, p), NaN, false)
 
     function derivatives(β)
         ll = 0.0
@@ -402,71 +534,25 @@ function _logistic_fit(X::Matrix{Float64}, y::Vector{Bool};
         return ll, grad, hess
     end
 
-    β = zeros(p)
-    ll, grad, hess = derivatives(β)
-    converged = false
-
-    for _ in 1:maxiter
-        step = try
-            -hess \ grad
-        catch
-            break
-        end
-
-        stepsize = 1.0
-        ll_new, grad_new, hess_new = ll, grad, hess
-        for _ in 1:10
-            ll_new, grad_new, hess_new = derivatives(β .+ stepsize .* step)
-            ll_new >= ll && break
-            stepsize /= 2
-        end
-
-        β .+= stepsize .* step
-        ll_change = abs(ll_new - ll)
-        ll, grad, hess = ll_new, grad_new, hess_new
-
-        if ll_change < tol && norm(grad) < sqrt(tol)
-            converged = true
-            break
-        end
-    end
-
-    se = try
-        sqrt.(abs.(diag(pinv(-hess))))
-    catch
-        fill(NaN, p)
-    end
-
-    return (β, se, ll, converged)
+    fit = newton_fit(derivatives, zeros(p); maxiter=maxiter, tol=tol)
+    return (fit.θ, fit.se, fit.vcov, fit.loglik, fit.converged)
 end
 
-"""
-    cmple(model::STERGMModel; maxiter=100, tol=1e-8) -> STERGMResult
-
-Conditional maximum pseudo-likelihood: for every transition t,
-
-- **formation** rows are the non-edges of Y_{t-1}; the response is edge
-  presence in Y_t and change statistics are evaluated on the formation
-  network Y⁺ = Y_{t-1} ∪ Y_t;
-- **dissolution** rows are the edges of Y_{t-1}; the response is
-  persistence into Y_t and change statistics are evaluated on the
-  dissolution network Y⁻ = Y_{t-1} ∩ Y_t.
-
-Rows pool across transitions; the two logistic likelihoods are maximized
-independently (separability). Standard errors are pseudo-likelihood SEs —
-anticonservative for dyad-dependent terms.
-"""
-function cmple(model::STERGMModel{T}; maxiter::Int=100, tol::Float64=1e-8) where T
+# Per-transition CMPLE design blocks: for transition t (2:T), the
+# formation rows (prior non-edges, stats on Y⁺) and dissolution rows
+# (prior edges, stats on Y⁻). Kept per transition so the block bootstrap
+# can resample whole transitions.
+function _cmple_blocks(model::STERGMModel)
     fterms = model.formula.formation
     dterms = model.formula.dissolution
     pf, pd = length(fterms), length(dterms)
     directed = is_directed(model.networks[1])
     n = Int(nv(model.networks[1]))
 
-    Xf_rows = Vector{Vector{Float64}}()
-    yf = Bool[]
-    Xd_rows = Vector{Vector{Float64}}()
-    yd = Bool[]
+    Xf_blocks = Matrix{Float64}[]
+    yf_blocks = Vector{Bool}[]
+    Xd_blocks = Matrix{Float64}[]
+    yd_blocks = Vector{Bool}[]
 
     for t in 2:length(model.networks)
         prev = model.networks[t-1]
@@ -474,6 +560,10 @@ function cmple(model::STERGMModel{T}; maxiter::Int=100, tol::Float64=1e-8) where
         yplus = formation_network(prev, curr)
         yminus = dissolution_network(prev, curr)
 
+        Xf_rows = Vector{Vector{Float64}}()
+        yf = Bool[]
+        Xd_rows = Vector{Vector{Float64}}()
+        yd = Bool[]
         for i in 1:n
             for j in (directed ? (1:n) : (i+1:n))
                 i == j && continue
@@ -490,18 +580,127 @@ function cmple(model::STERGMModel{T}; maxiter::Int=100, tol::Float64=1e-8) where
                 end
             end
         end
+
+        push!(Xf_blocks, isempty(Xf_rows) ? Matrix{Float64}(undef, 0, pf) :
+                         permutedims(reduce(hcat, Xf_rows)))
+        push!(yf_blocks, yf)
+        push!(Xd_blocks, isempty(Xd_rows) ? Matrix{Float64}(undef, 0, pd) :
+                         permutedims(reduce(hcat, Xd_rows)))
+        push!(yd_blocks, yd)
     end
 
-    Xf = isempty(Xf_rows) ? Matrix{Float64}(undef, 0, pf) :
-         permutedims(reduce(hcat, Xf_rows))
-    Xd = isempty(Xd_rows) ? Matrix{Float64}(undef, 0, pd) :
-         permutedims(reduce(hcat, Xd_rows))
+    return Xf_blocks, yf_blocks, Xd_blocks, yd_blocks
+end
 
-    fcoef, fse, fll, fconv = _logistic_fit(Xf, yf; maxiter=maxiter, tol=tol)
-    dcoef, dse, dll, dconv = _logistic_fit(Xd, yd; maxiter=maxiter, tol=tol)
+_stack(blocks::Vector{Matrix{Float64}}, p::Int) =
+    isempty(blocks) ? Matrix{Float64}(undef, 0, p) : reduce(vcat, blocks)
+_stack(blocks::Vector{Vector{Bool}}) =
+    isempty(blocks) ? Bool[] : reduce(vcat, blocks)
 
-    return STERGMResult(model, fcoef, fse, dcoef, dse, fll, dll,
-                        fconv && dconv, :cmple)
+# Per-transition block bootstrap of the CMPLE (the btergm approach):
+# resample whole time-transitions with replacement, refit both logistic
+# pseudo-likelihoods on the resampled rows, and return the empirical
+# covariance of the stacked (formation, dissolution) coefficients.
+# Replicates with non-finite coefficients (e.g. separation in a resample)
+# are dropped with a warning.
+function _cmple_block_bootstrap(Xf_blocks, yf_blocks, Xd_blocks, yd_blocks,
+                                pf::Int, pd::Int;
+                                n_boot::Int, maxiter::Int, tol::Float64,
+                                rng::Random.AbstractRNG)
+    n_trans = length(Xf_blocks)
+    n_trans >= 2 ||
+        throw(ArgumentError("se=:bootstrap resamples time-transitions and " *
+                            "needs at least 3 panels (2 transitions); got " *
+                            "$(n_trans) transition(s)"))
+    n_boot >= 2 || throw(ArgumentError("n_boot must be at least 2"))
+
+    boot = Matrix{Float64}(undef, n_boot, pf + pd)
+    n_ok = 0
+    for _ in 1:n_boot
+        idx = rand(rng, 1:n_trans, n_trans)
+        fcoef, _, _, _, _ = _logistic_fit(_stack(Xf_blocks[idx], pf),
+                                          _stack(yf_blocks[idx]);
+                                          maxiter=maxiter, tol=tol)
+        dcoef, _, _, _, _ = _logistic_fit(_stack(Xd_blocks[idx], pd),
+                                          _stack(yd_blocks[idx]);
+                                          maxiter=maxiter, tol=tol)
+        θb = vcat(fcoef, dcoef)
+        all(isfinite, θb) || continue
+        n_ok += 1
+        boot[n_ok, :] = θb
+    end
+
+    n_ok >= 2 ||
+        error("block bootstrap failed: fewer than 2 of $n_boot replicates " *
+              "produced finite coefficients")
+    n_ok < n_boot &&
+        @warn "block bootstrap: dropped $(n_boot - n_ok) of $n_boot " *
+              "replicates with non-finite coefficients"
+
+    return Matrix(cov(@view boot[1:n_ok, :]))
+end
+
+"""
+    cmple(model::STERGMModel; maxiter=100, tol=1e-8, se=:hessian,
+          n_boot=200, rng=Random.default_rng()) -> STERGMResult
+
+Conditional maximum pseudo-likelihood: for every transition t,
+
+- **formation** rows are the non-edges of Y_{t-1}; the response is edge
+  presence in Y_t and change statistics are evaluated on the formation
+  network Y⁺ = Y_{t-1} ∪ Y_t;
+- **dissolution** rows are the edges of Y_{t-1}; the response is
+  persistence into Y_t and change statistics are evaluated on the
+  dissolution network Y⁻ = Y_{t-1} ∩ Y_t.
+
+Rows pool across transitions; the two logistic likelihoods are maximized
+independently (separability).
+
+`se` selects the standard errors:
+- `:hessian` (default) — inverse observed pseudo-likelihood information.
+  **Caution:** anticonservative for dyad-dependent terms.
+- `:bootstrap` — per-transition block bootstrap (the `btergm` approach):
+  resample the time-transitions with replacement `n_boot` times, refit the
+  CMPLE on each resample, and use the empirical covariance of the refitted
+  stacked coefficients (needs at least 2 transitions, i.e. 3 panels).
+  `rng` seeds the resampling. Point estimates are unchanged; `vcov` becomes
+  the full joint bootstrap covariance (no longer block-diagonal).
+"""
+function cmple(model::STERGMModel{T}; maxiter::Int=100, tol::Float64=1e-8,
+               se::Symbol=:hessian, n_boot::Int=200,
+               rng::Random.AbstractRNG=Random.default_rng()) where T
+    se in (:hessian, :bootstrap) ||
+        throw(ArgumentError("se must be :hessian or :bootstrap, got :$se"))
+
+    fterms = model.formula.formation
+    dterms = model.formula.dissolution
+    pf, pd = length(fterms), length(dterms)
+
+    Xf_blocks, yf_blocks, Xd_blocks, yd_blocks = _cmple_blocks(model)
+
+    fcoef, fse, fvcov, fll, fconv = _logistic_fit(_stack(Xf_blocks, pf),
+                                                  _stack(yf_blocks);
+                                                  maxiter=maxiter, tol=tol)
+    dcoef, dse, dvcov, dll, dconv = _logistic_fit(_stack(Xd_blocks, pd),
+                                                  _stack(yd_blocks);
+                                                  maxiter=maxiter, tol=tol)
+
+    if se == :bootstrap
+        vcov_joint = _cmple_block_bootstrap(Xf_blocks, yf_blocks,
+                                            Xd_blocks, yd_blocks, pf, pd;
+                                            n_boot=n_boot, maxiter=maxiter,
+                                            tol=tol, rng=rng)
+        ses = sqrt.(max.(diag(vcov_joint), 0.0))
+        fse, dse = ses[1:pf], ses[pf+1:end]
+    else
+        # Joint covariance of the stacked coefficients: block-diagonal,
+        # since the formation and dissolution likelihoods are maximized
+        # independently
+        vcov_joint = [fvcov zeros(pf, pd); zeros(pd, pf) dvcov]
+    end
+
+    return STERGMResult(model, fcoef, fse, dcoef, dse, vcov_joint, fll, dll,
+                        fconv && dconv, :cmple, se)
 end
 
 """
@@ -517,8 +716,9 @@ function cmle(model::STERGMModel; kwargs...)
     result = cmple(model; kwargs...)
     return STERGMResult(result.model, result.formation_coef, result.formation_se,
                         result.dissolution_coef, result.dissolution_se,
-                        result.loglik_formation, result.loglik_dissolution,
-                        result.converged, :cmle)
+                        result.vcov, result.loglik_formation,
+                        result.loglik_dissolution, result.converged, :cmle,
+                        result.se_type)
 end
 
 """
@@ -605,13 +805,14 @@ function simulate_stergm(prev_net::Network, formula::STERGM,
     yminus = _sample_constrained(prev_net, formula.dissolution, θ_diss,
                                  :dissolution, burnin, rng)
 
-    # Y_t = new formations ∪ persisted ties
-    yt = Network{Int}(; n=Int(nv(prev_net)), directed=is_directed(prev_net))
+    # Y_t = new formations ∪ persisted ties (attribute-preserving: start
+    # from a copy of Y_{t-1}, drop dissolved ties, add formed ones)
+    yt = _copy_net(prev_net)
+    for e in edges(prev_net)
+        has_edge(yminus, src(e), dst(e)) || rem_edge!(yt, src(e), dst(e))
+    end
     for e in edges(yplus)
         has_edge(prev_net, src(e), dst(e)) || add_edge!(yt, src(e), dst(e))
-    end
-    for e in edges(yminus)
-        add_edge!(yt, src(e), dst(e))
     end
     return yt
 end
@@ -656,47 +857,50 @@ end
 # =============================================================================
 
 """
-    stergm_gof(result::STERGMResult; n_sim=50, rng=...) -> NamedTuple
+    gof(result::STERGMResult; n_sim=50, rng=...) -> GOFResult
 
 Transition-level goodness of fit: for each observed transition, simulate
 `n_sim` STERGM transitions from the same starting panel and compare the
-observed number of formed and persisted ties to their simulated
-distributions (two-sided Monte Carlo p-values, pooled over transitions).
+observed number of formed and persisted ties (pooled over transitions) to
+their simulated distributions.
+
+Extends Network.jl's shared `gof` generic and returns the shared
+`Network.GOFResult` container: one `GOFStatistic` panel named
+`"tie changes"` with levels `"formed"` and `"persisted"`, and two-sided
+Monte-Carlo p-values computed with the `(1 + k)/(N + 1)` estimator (never
+exactly zero). [`stergm_gof`](@ref) is a backward-compatible alias.
 """
-function stergm_gof(result::STERGMResult; n_sim::Int=50,
-                    rng::Random.AbstractRNG=Random.default_rng())
+function gof(result::STERGMResult; n_sim::Int=50,
+             rng::Random.AbstractRNG=Random.default_rng())
     model = result.model
     nets = model.networks
     formula = model.formula
 
-    obs_formed = 0.0
-    obs_persisted = 0.0
-    sim_formed = zeros(n_sim)
-    sim_persisted = zeros(n_sim)
+    obs = zeros(2)              # pooled (formed, persisted) tie counts
+    sims = zeros(n_sim, 2)
 
     for t in 2:length(nets)
         prev, curr = nets[t-1], nets[t]
-        obs_formed += compute(NewEdge(), curr, prev)
-        obs_persisted += compute(PersistentEdge(), curr, prev)
+        obs[1] += compute(NewEdge(), curr, prev)
+        obs[2] += compute(PersistentEdge(), curr, prev)
 
         for s in 1:n_sim
             sim = simulate_stergm(prev, formula, result.formation_coef,
                                   result.dissolution_coef; rng=rng)
-            sim_formed[s] += compute(NewEdge(), sim, prev)
-            sim_persisted[s] += compute(PersistentEdge(), sim, prev)
+            sims[s, 1] += compute(NewEdge(), sim, prev)
+            sims[s, 2] += compute(PersistentEdge(), sim, prev)
         end
     end
 
-    mc_p = (sims, obs) -> min(1.0, 2.0 * min(mean(sims .>= obs), mean(sims .<= obs)))
-
-    return (
-        observed = (formed = obs_formed, persisted = obs_persisted),
-        simulated_mean = (formed = mean(sim_formed), persisted = mean(sim_persisted)),
-        simulated_sd = (formed = std(sim_formed), persisted = std(sim_persisted)),
-        p_values = (formed = mc_p(sim_formed, obs_formed),
-                    persisted = mc_p(sim_persisted, obs_persisted)),
-        n_sim = n_sim
-    )
+    stat = GOFStatistic("tie changes", ["formed", "persisted"], obs, sims)
+    return GOFResult(stat; model="STERGM")
 end
+
+"""
+    stergm_gof(result::STERGMResult; n_sim=50, rng=...) -> GOFResult
+
+Backward-compatible alias for [`gof`](@ref) (Network.jl's shared generic).
+"""
+const stergm_gof = gof
 
 end # module

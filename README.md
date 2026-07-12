@@ -60,6 +60,13 @@ terms (`Triangle`, `Mutual`, ...) it is an approximation — `method =
 implemented), and `method = :egmme` raises an error rather than
 fabricating estimates.
 
+`se = :bootstrap` swaps the naive pseudo-likelihood standard errors for a
+per-transition block bootstrap (the `btergm` approach): resample the
+time-transitions with replacement, refit, and take the empirical
+covariance of the coefficients (needs at least three panels; seed with
+`rng`). Fits of dyad-dependent formulas with naive standard errors print
+an explicit caveat.
+
 An edges-only model reproduces the analytic formation/persistence
 log-odds exactly, and simulation→estimation round trips recover both
 coefficient vectors (tested).
