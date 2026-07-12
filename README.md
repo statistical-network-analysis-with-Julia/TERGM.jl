@@ -15,6 +15,23 @@
 Separable Temporal ERGMs (STERGM) in Julia — a port of the R `tergm`
 package (Krivitsky & Handcock 2014).
 
+## Installation
+
+Requires Julia 1.12+. TERGM.jl depends on the unregistered
+[Network.jl](https://github.com/statistical-network-analysis-with-Julia/Network.jl) and [ERGM.jl](https://github.com/statistical-network-analysis-with-Julia/ERGM.jl) packages, which must be added first (in this order):
+
+```julia
+using Pkg
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Network.jl")
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/ERGM.jl")
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/TERGM.jl")
+```
+
+For development, you can instead clone all ecosystem repositories side by
+side (the monorepo layout) and start Julia with the root workspace project
+(`julia --project=.` in the clone root): the `[sources]` path dependencies
+then wire the packages together with no ordered installs needed.
+
 ## The separable model
 
 Each transition Y_{t−1} → Y_t factors into:
@@ -34,10 +51,23 @@ condition on Y_{t−1}.
 ## Quick Start
 
 ```julia
-using TERGM, ERGM, Network
+using TERGM, ERGM, Network, Random
 
-networks = [net_t0, net_t1, net_t2]   # panel of same-sized Networks
+# Panel of same-sized Networks (here: three noisy copies of a random start)
+rng = Xoshiro(5)
+net_t0 = network(20; directed=true)
+for i in 1:20, j in 1:20
+    i != j && rand(rng) < 0.1 && add_edge!(net_t0, i, j)
+end
+net_t1 = copy(net_t0); net_t2 = copy(net_t1)
+for w in (net_t1, net_t2), _ in 1:15
+    i, j = rand(rng, 1:20), rand(rng, 1:20)
+    i == j && continue
+    has_edge(w, i, j) ? rem_edge!(w, i, j) : add_edge!(w, i, j)
+end
+networks = [net_t0, net_t1, net_t2]
 
+# fit_stergm is the standardized alias (fit_<model> naming)
 result = stergm(networks,
                 [Edges(), Mutual()],       # formation model
                 [Edges()])                 # dissolution (persistence) model

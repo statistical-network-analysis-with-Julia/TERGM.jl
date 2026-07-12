@@ -21,7 +21,10 @@ Network = {path = "../Network.jl"}
 Distributions = "0.25"
 ERGM = "0.1"
 Graphs = "1.9"
+LinearAlgebra = "1.12.0"
 Network = "0.1"
+Random = "1.11.0"
+Statistics = "1.11.1"
 StatsAPI = "1.7"
 julia = "1.12"
 
