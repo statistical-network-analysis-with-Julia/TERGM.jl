@@ -1,5 +1,9 @@
 # Temporal Terms
 
+```@meta
+CurrentModule = TERGM
+```
+
 Formation and dissolution models accept two kinds of terms:
 
 1. **Standard ERGM.jl terms** (`Edges`, `Mutual`, `Triangle`,

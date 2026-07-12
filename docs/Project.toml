@@ -7,9 +7,9 @@ TERGM = "6fc22812-126d-4a5c-ac3d-a5f62b7af224"
 
 [sources]
 TERGM = {path = ".."}
-ERGM = {url = "https://github.com/statistical-network-analysis-with-Julia/ERGM.jl.git"}
-Network = {url = "https://github.com/statistical-network-analysis-with-Julia/Network.jl.git"}
-NetworkDynamic = {url = "https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl.git"}
+ERGM = {path = "../../ERGM.jl"}
+Network = {path = "../../Network.jl"}
+NetworkDynamic = {path = "../../NetworkDynamic.jl"}
 
 [compat]
 Documenter = "1"
