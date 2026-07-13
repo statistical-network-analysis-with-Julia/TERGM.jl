@@ -18,11 +18,11 @@ package (Krivitsky & Handcock 2014).
 ## Installation
 
 Requires Julia 1.12+. TERGM.jl depends on the unregistered
-[Network.jl](https://github.com/statistical-network-analysis-with-Julia/Network.jl) and [ERGM.jl](https://github.com/statistical-network-analysis-with-Julia/ERGM.jl) packages, which must be added first (in this order):
+[Networks.jl](https://github.com/statistical-network-analysis-with-Julia/Networks.jl) and [ERGM.jl](https://github.com/statistical-network-analysis-with-Julia/ERGM.jl) packages, which must be added first (in this order):
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Network.jl")
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Networks.jl")
 Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/ERGM.jl")
 Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/TERGM.jl")
 ```

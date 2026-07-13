@@ -26,18 +26,25 @@ using Distributions
 using ERGM
 using Graphs
 using LinearAlgebra
-using Network
+using Networks
 using Random
 using Statistics
 
-import ERGM: name, compute, change_stat, is_dyad_dependent, newton_fit
+import ERGM: name, compute, change_stat, is_dyad_dependent, newton_fit,
+              logistic_derivatives
 import StatsAPI
 import StatsAPI: coef, stderror, vcov, loglikelihood, aic, bic, nobs, dof
 
-# `gof` extends the ONE shared Network.jl generic (every model package adds
+# `gof` extends the ONE shared Networks.jl generic (every model package adds
 # methods for its own result types), so `gof(fit)` works uniformly across the
 # ecosystem and loading several model packages never collides on the name.
-import Network: gof
+import Networks: gof
+
+# The shared result-metadata protocol (Networks.jl `src/results.jl`): the seven
+# generic accessors that say what a fit actually did. Imported by name because
+# TERGM adds methods for `STERGMResult`; `fit_metadata(fit)` collects them.
+import Networks: estimand, objective, is_exact, se_method, missing_method,
+                 approximations
 
 # Model types
 export STERGM, STERGMResult, STERGMModel
@@ -49,12 +56,15 @@ export EdgeStability, Delrecip, PersistentEdge, NewEdge
 export formation_network, dissolution_network
 
 # Estimation
-export stergm, fit_stergm, cmple, cmle, egmme
+# `egmme` is deliberately NOT exported: it is unimplemented and can only
+# throw, and exporting a name advertises a capability. It remains reachable
+# as `TERGM.egmme` so the error is informative rather than an UndefVarError.
+export stergm, fit_stergm, cmple, cmle
 
 # Simulation
 export simulate_stergm, simulate_network_sequence
 
-# Diagnostics (`gof` is Network.jl's shared generic, extended with a method
+# Diagnostics (`gof` is Networks.jl's shared generic, extended with a method
 # for STERGMResult; `stergm_gof` is kept as a backward-compatible alias)
 export gof, stergm_gof
 
@@ -364,6 +374,12 @@ struct STERGMModel{T}
             (nv(net) == n && is_directed(net) == dir) ||
                 throw(ArgumentError("all panels must share size and directedness"))
         end
+        # Panel missingness is not implemented: CMPLE enumerates every free
+        # dyad of Y⁺/Y⁻ as observed, so a masked dyad would silently enter the
+        # design matrix at its face value. Reject rather than invent data.
+        for (t, net) in enumerate(networks)
+            require_observed(net; context="TERGM (panel $t)", face_ok=false)
+        end
         _validate_terms(formula.formation, networks, "formation")
         _validate_terms(formula.dissolution, networks, "dissolution")
         new{T}(formula, networks)
@@ -404,6 +420,25 @@ STERGMResult(model, formation_coef, formation_se, dissolution_coef,
                  dissolution_se, vcov, loglik_formation, loglik_dissolution,
                  converged, method, :hessian)
 
+"""
+    _has_dyad_dependent(model::STERGMModel) -> Bool
+
+Whether **either** formula (formation or dissolution) contains a dyad-dependent
+term (`ERGM.is_dyad_dependent`; the temporal terms are dyad-independent — they
+condition only on the exogenous previous network).
+
+This is THE predicate that decides whether CMPLE is an approximation: when both
+formulas are dyad-independent the conditional pseudo-likelihood *is* the
+conditional likelihood, so CMPLE is the exact CMLE and the inverse-Hessian
+standard errors are the exact ML ones. Defined once and used by both
+`show(::STERGMResult)` (the prose caveat) and `is_exact(::STERGMResult)` (the
+machine-readable answer), so the two cannot drift apart.
+"""
+_has_dyad_dependent(model::STERGMModel) =
+    any(is_dyad_dependent(t)
+        for t in Iterators.flatten((model.formula.formation,
+                                    model.formula.dissolution)))
+
 function Base.show(io::IO, r::STERGMResult)
     println(io, "STERGM Results ($(r.method))")
     println(io, "="^40)
@@ -412,7 +447,7 @@ function Base.show(io::IO, r::STERGMResult)
                 "dissolution $(round(r.loglik_dissolution, digits=3))")
     println(io)
 
-    # Shared ecosystem presentation layer (Network.print_coeftable): one
+    # Shared ecosystem presentation layer (Networks.print_coeftable): one
     # R-style table per model, with the significance-code legend printed
     # once below the second table
     fz = r.formation_coef ./ r.formation_se
@@ -429,9 +464,7 @@ function Base.show(io::IO, r::STERGMResult)
     # Honest-uncertainty caveat (mirroring ERGM.jl's show): CMPLE fits of
     # dyad-dependent formulas have suspect inverse-Hessian standard errors.
     # Dyad-independent formulas need no caveat — there CMPLE is the CMLE.
-    if r.method in (:cmple, :cmle) &&
-       any(is_dyad_dependent(t)
-           for t in vcat(r.model.formula.formation, r.model.formula.dissolution))
+    if r.method in (:cmple, :cmle) && _has_dyad_dependent(r.model)
         println(io)
         if r.se_type == :bootstrap
             println(io, "Note: this model contains dyad-dependent terms and was fit by")
@@ -446,6 +479,58 @@ function Base.show(io::IO, r::STERGMResult)
             println(io, "se=:bootstrap for per-transition block-bootstrap standard errors.")
         end
     end
+end
+
+# ============================================================================
+# The shared result-metadata protocol (Networks.jl `src/results.jl`)
+# ============================================================================
+#
+# `fit_metadata(fit)` collects these accessors. They are derived from the SAME
+# `_has_dyad_dependent` predicate the prose caveat in `show` uses, so the
+# machine-readable answer and the printed one can never disagree.
+
+estimand(::STERGMResult) = :stergm
+
+"""
+    objective(r::STERGMResult) -> Symbol
+
+`:conditional_pseudolikelihood` — the pooled logistic pseudo-likelihood over the
+free dyads of the formation (Y⁺) and dissolution (Y⁻) auxiliary networks.
+"""
+objective(::STERGMResult) = :conditional_pseudolikelihood
+
+"""
+    is_exact(r::STERGMResult) -> Bool
+
+`true` iff **every** term in **both** formulas is dyad-independent: there the
+conditional pseudo-likelihood is the conditional likelihood, so CMPLE is the
+exact CMLE. Add one dyad-dependent term to either formula and the same estimator
+reports `false` — the approximation is a property of the fit, not of the method
+name.
+"""
+is_exact(r::STERGMResult) =
+    r.method in (:cmple, :cmle) && !_has_dyad_dependent(r.model)
+
+se_method(r::STERGMResult) = r.se_type
+
+# `STERGMModel` calls `require_observed` on every panel with the default
+# `:error` policy: CMPLE would enumerate a masked dyad at its face value, so
+# masked panels are refused outright rather than silently used.
+missing_method(::STERGMResult) = :rejected
+
+function approximations(r::STERGMResult)
+    out = String[]
+    if _has_dyad_dependent(r.model)
+        push!(out, "conditional maximum pseudo-likelihood of a dyad-dependent " *
+                   "formula: the dyad conditionals of each transition are " *
+                   "multiplied as if independent, so the point estimates are " *
+                   "biased in finite samples")
+        r.se_type === :hessian &&
+            push!(out, "inverse-Hessian standard errors of the naive " *
+                       "conditional pseudo-likelihood: expected anticonservative " *
+                       "under dyadic dependence")
+    end
+    return out
 end
 
 # StatsAPI interface: methods on the shared statistics generics (mirroring
@@ -517,24 +602,14 @@ function _logistic_fit(X::Matrix{Float64}, y::Vector{Bool};
     n, p = size(X)
     n > 0 || return (fill(NaN, p), fill(NaN, p), fill(NaN, p, p), NaN, false)
 
-    function derivatives(β)
-        ll = 0.0
-        grad = zeros(p)
-        hess = zeros(p, p)
-        for r in 1:n
-            η = dot(β, @view X[r, :])
-            pr = 1.0 / (1.0 + exp(-η))
-            ll += y[r] ? (η < 0 ? η - log1p(exp(η)) : -log1p(exp(-η))) :
-                         (η < 0 ? -log1p(exp(η)) : -η - log1p(exp(-η)))
-            resid = (y[r] ? 1.0 : 0.0) - pr
-            x = @view X[r, :]
-            grad .+= resid .* x
-            hess .-= (pr * (1 - pr)) .* (x * x')
-        end
-        return ll, grad, hess
-    end
-
-    fit = newton_fit(derivatives, zeros(p); maxiter=maxiter, tol=tol)
+    # The derivatives come from the shared `ERGM.logistic_derivatives` (review
+    # finding 15): the CMPLE over the free dyads IS a logistic likelihood, and
+    # its derivatives are gemv/gemm over the whole design — η = Xβ, ∇ = X'r,
+    # −H = X'WX — rather than a per-row `x * x'` outer product allocating a p×p
+    # matrix on every one of the n rows of every Newton evaluation. Never paste
+    # the loop back in; ERGMMulti and ERGMRank run on the same one.
+    fit = newton_fit(logistic_derivatives(X, y), zeros(p); maxiter=maxiter,
+                     tol=tol)
     return (fit.θ, fit.se, fit.vcov, fit.loglik, fit.converged)
 end
 
@@ -704,29 +779,41 @@ function cmple(model::STERGMModel{T}; maxiter::Int=100, tol::Float64=1e-8,
 end
 
 """
-    cmle(model::STERGMModel; kwargs...) -> STERGMResult
+    cmle(model::STERGMModel; kwargs...)
 
-Alias for [`cmple`](@ref). True MCMC-based CMLE is **not implemented**;
-CMPLE coincides with it only for dyad-independent terms, so a one-time
-warning is emitted.
+Conditional maximum likelihood (MCMC-based) is **not implemented** and this
+function **throws**.
+
+It previously warned and silently returned a [`cmple`](@ref) fit labelled
+`:cmle`. That is unsafe for research use: a warning is easy to miss in a script
+that continues, and the returned object then misreports its own estimator.
+CMPLE coincides with CMLE only for dyad-independent formulas; for dependent
+terms it is a different estimator with anticonservative standard errors.
+
+Call [`cmple`](@ref) explicitly (`method = :cmple`, the default) to fit by
+conditional maximum *pseudo*-likelihood.
 """
 function cmle(model::STERGMModel; kwargs...)
-    @warn "cmle: MCMC-based CMLE is not implemented; falling back to CMPLE " *
-          "(exact only for dyad-independent terms)" maxlog = 1
-    result = cmple(model; kwargs...)
-    return STERGMResult(result.model, result.formation_coef, result.formation_se,
-                        result.dissolution_coef, result.dissolution_se,
-                        result.vcov, result.loglik_formation,
-                        result.loglik_dissolution, result.converged, :cmle,
-                        result.se_type)
+    throw(ArgumentError(
+        "cmle: MCMC-based conditional maximum likelihood is not implemented in " *
+        "TERGM.jl. It is not the same estimator as CMPLE except for " *
+        "dyad-independent formulas, so this no longer falls back silently.\n" *
+        "  • use `cmple(model)` (or `method = :cmple`, the default) to fit by " *
+        "conditional maximum pseudo-likelihood; pass `se = :bootstrap` for " *
+        "per-transition block-bootstrap standard errors."))
 end
 
 """
-    egmme(model::STERGMModel; kwargs...)
+    TERGM.egmme(model::STERGMModel; kwargs...)
 
-Equilibrium Generalized Method of Moments estimation is **not
-implemented**; this raises an error rather than returning placeholder
-coefficients. Use CMPLE on panel data.
+Equilibrium Generalized Method of Moments estimation is **not implemented**
+and this function is **not exported** — exporting it would advertise an
+estimator that does not exist. It is retained, and reachable as
+`TERGM.egmme`, only so that calling it raises an informative error rather
+than an `UndefVarError`; `stergm(...; method = :egmme)` throws the same
+error.
+
+Use [`cmple`](@ref) (`method = :cmple`, the default) on panel data.
 """
 function egmme(model::STERGMModel; kwargs...)
     error("EGMME is not implemented in TERGM.jl; fit panel data with " *
@@ -864,8 +951,8 @@ Transition-level goodness of fit: for each observed transition, simulate
 observed number of formed and persisted ties (pooled over transitions) to
 their simulated distributions.
 
-Extends Network.jl's shared `gof` generic and returns the shared
-`Network.GOFResult` container: one `GOFStatistic` panel named
+Extends Networks.jl's shared `gof` generic and returns the shared
+`Networks.GOFResult` container: one `GOFStatistic` panel named
 `"tie changes"` with levels `"formed"` and `"persisted"`, and two-sided
 Monte-Carlo p-values computed with the `(1 + k)/(N + 1)` estimator (never
 exactly zero). [`stergm_gof`](@ref) is a backward-compatible alias.
@@ -899,7 +986,7 @@ end
 """
     stergm_gof(result::STERGMResult; n_sim=50, rng=...) -> GOFResult
 
-Backward-compatible alias for [`gof`](@ref) (Network.jl's shared generic).
+Backward-compatible alias for [`gof`](@ref) (Networks.jl's shared generic).
 """
 const stergm_gof = gof
 

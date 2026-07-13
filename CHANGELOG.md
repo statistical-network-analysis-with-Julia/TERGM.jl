@@ -14,7 +14,7 @@ columns), with block-bootstrap SEs, StatsAPI accessors, and a shared
 
 ### Breaking
 
-- **`stergm_gof` returns a `Network.GOFResult`** instead of a NamedTuple
+- **`stergm_gof` returns a `Networks.GOFResult`** instead of a NamedTuple
   `(observed, simulated_mean, simulated_sd, z_scores)` of user-supplied
   network statistics. The result has a "tie changes" panel (levels
   `formed`/`persisted`) with Monte-Carlo p-values; the `statistics=` keyword
@@ -37,10 +37,16 @@ columns), with block-bootstrap SEs, StatsAPI accessors, and a shared
   Default `burnin` raised 100 → 3000. *Migration:* move coefficients out of
   keywords.
 - **Default estimation method is `:cmple`** (the honest name for what was
-  fit all along); `method=:cmle` still runs but warns once that MCMC-based
-  CMLE is not implemented and falls back to CMPLE, and `egmme` now throws
-  instead of returning placeholder zero coefficients. *Migration:* use
-  `method=:cmple` (numerically identical to the old default path).
+  fit all along). `cmle`/`method=:cmle` now throws an `ArgumentError` instead
+  of silently returning a CMPLE fit stamped `:cmle`: MCMC-based CMLE is not
+  implemented, and CMPLE is only the same estimator for dyad-independent
+  formulas. `egmme` throws instead of returning placeholder zero
+  coefficients, and is **no longer exported** — an unimplemented estimator
+  should not advertise itself in the public API. It is still reachable as
+  `TERGM.egmme` (so the error is informative, not an `UndefVarError`), and
+  `stergm(...; method=:egmme)` still raises. *Migration:* use `method=:cmple`
+  (numerically identical to the old default path); replace bare `egmme` with
+  `TERGM.egmme` if you were relying on the export.
 - **Removed term types:** `EdgeAge`, `Memory`, `TimeLag`, and the
   `FormationTerm`/`DissolutionTerm` wrappers (plus the phantom
   `FormationModel`/`DissolutionModel` exports). Standard ERGM terms now go
@@ -60,6 +66,34 @@ columns), with block-bootstrap SEs, StatsAPI accessors, and a shared
 
 ### Added
 
+- **Provenanced golden fixture against a real statnet `tergm` CMPLE fit**
+  (issue #8). `test/fixtures/panel_stergm.toml` freezes a tergm 4.2.2 fit of a
+  simulated 8-wave, 25-actor directed panel (`Form(~edges + nodematch("grp")) +
+  Persist(~edges + nodematch("grp"))`), regenerable with
+  `Rscript test/fixtures/r/panel_stergm.R > test/fixtures/panel_stergm.toml`. The
+  eight waves are frozen as edge lists, so both packages fit identical networks.
+
+  The formulas are **dyad-independent on purpose**: the conditional
+  pseudo-likelihood is then the conditional likelihood, CMPLE is the exact
+  conditional MLE, and agreement can be asserted at 1e-6 rather than hand-waved.
+
+  **Finding, and it is R's, not ours:** `tergm`'s CMPLE runs R's `glm` at the
+  default `epsilon = 1e-8` and stops there — **1.5e-8** short of the exact optimum
+  in the coefficients and **6.1e-6** short in the standard errors. TERGM.jl's
+  Newton–Raphson lands on the exact optimum, reproducing a tightly-converged
+  (`epsilon = 1e-14`) R `glm` to **~1e-10** in both. The fixture therefore freezes
+  *both*: `coefficients`/`std_errors` are tergm as shipped (SEs compared at 1e-4,
+  a tolerance that measures tergm's slack), and `exact_coefficients`/
+  `exact_std_errors` are the same estimator taken to convergence (compared at
+  1e-6, where TERGM.jl passes with four orders of magnitude to spare). The testset
+  also asserts TERGM.jl is *closer to the exact optimum than tergm itself is*.
+
+  Block-bootstrap SEs are compared too, at the resolution the bootstrap actually
+  has: the R script reruns its btergm-style transition resampling under five
+  further seeds and freezes the seed-to-seed sd of every bootstrap SE
+  (0.0011–0.0042). TERGM.jl's five-seed mean lands 0.0006–0.0071 from R's — the
+  two bootstraps differ by about as much as either differs from itself.
+
 - `formation_network(prev, curr)` and `dissolution_network(prev, curr)`
   exported constructors for the Y⁺/Y⁻ auxiliary networks.
 - Per-transition block-bootstrap standard errors (the btergm approach):
@@ -68,7 +102,7 @@ columns), with block-bootstrap SEs, StatsAPI accessors, and a shared
   honest-uncertainty caveat for dyad-dependent CMPLE fits.
 - StatsAPI accessors on `STERGMResult`: `coef`, `stderror`, `vcov`,
   `loglikelihood`, `aic`, `bic`, `nobs`, `dof`.
-- `gof` method on the ecosystem-wide `Network.gof` generic (`stergm_gof`
+- `gof` method on the ecosystem-wide `Networks.gof` generic (`stergm_gof`
   kept as an alias).
 - Formula validation at model construction: attribute-based terms must
   reference a vertex attribute present on every panel, and
@@ -102,6 +136,20 @@ columns), with block-bootstrap SEs, StatsAPI accessors, and a shared
 
 ### Performance
 
+- **The CMPLE derivative loop no longer allocates (review finding 15).**
+  `_logistic_fit` carried its own copy of the logistic loop with a per-row
+  `(pr*(1-pr)) .* (x * x')` inside it — a fresh `p×p` matrix on every one of the
+  design rows of every Newton evaluation, **471 KB per evaluation** on a
+  25-actor, 8-wave panel. It now runs on the shared `ERGM.logistic_derivatives`
+  (the same builder ERGMMulti and ERGMRank use): **192 bytes** per evaluation,
+  independent of the number of rows, and **4.0x faster** (0.460 ms -> 0.114 ms).
+  Pinned by an `@allocated` regression test. The summation order moves from
+  row-wise accumulation to BLAS, so the arithmetic is not bit-identical — but
+  the fitted coefficients are: measured against the old loop on the same
+  design, **max|Δθ| = 0.0**. Newton's last step is quadratically convergent, so
+  a last-ulp difference in the gradient and Hessian does not move the fixed
+  point. The golden `tergm` CMPLE fixture is unmoved at its 1e-6 exact-CMLE
+  tolerance.
 - Estimation builds per-transition design blocks once and fits via the
   shared `ERGM.newton_fit` (Newton with step halving), with numerically
   stable `log1p(exp(...))` log-likelihoods, replacing the hand-rolled

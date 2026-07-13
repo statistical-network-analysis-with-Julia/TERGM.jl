@@ -26,9 +26,13 @@ terms (`Mutual`, `Delrecip`) on undirected panels, throw an
     dyad-dependent terms (`Triangle`, `Mutual`, ...) it is an
     approximation, and the pseudo-likelihood standard errors are
     anticonservative (fitted results print a caveat). `method = :cmle`
-    warns and falls back to CMPLE — MCMC-based CMLE is not implemented.
-    `method = :egmme` raises an error: EGMME is not implemented, and no
-    placeholder estimates are returned.
+    raises an `ArgumentError` — MCMC-based CMLE is not implemented, and
+    CMPLE is not the same estimator except for dyad-independent formulas,
+    so it will not silently stand in for it. `method = :egmme` likewise
+    raises: EGMME is not implemented, and no placeholder estimates are
+    returned. `egmme` is not exported (an unimplemented estimator should
+    not appear in the public API); it remains callable as `TERGM.egmme`
+    purely so that the error explains itself.
 
 ## Block-bootstrap standard errors
 

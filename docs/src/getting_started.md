@@ -30,7 +30,7 @@ yminus = dissolution_network(networks[1], networks[2])
 
 # Simulate 10 steps forward and check fit
 future = simulate_stergm(result, 10)
-gof(result; n_sim = 100)   # Network.gof generic; stergm_gof is an alias
+gof(result; n_sim = 100)   # Networks.gof generic; stergm_gof is an alias
 ```
 
 Formation/dissolution models mix standard ERGM.jl terms with temporal
