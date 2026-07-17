@@ -23,3 +23,18 @@ Pages = ["getting_started.md", "guide/terms.md", "guide/estimation.md",
          "api/estimation.md"]
 Depth = 2
 ```
+
+## Citation
+
+If you use TERGM.jl in your work, please cite it using the entry in
+[`CITATION.bib`](https://github.com/statistical-network-analysis-with-Julia/TERGM.jl/blob/main/CITATION.bib):
+
+```biblatex
+@misc{SNWJTERGMJL,
+  author = {{Statistical Network Analysis with Julia}},
+  title = {TERGM.jl: Separable Temporal Exponential Random Graph Models in Julia},
+  year = {2026},
+  url = {https://github.com/statistical-network-analysis-with-Julia/TERGM.jl},
+  note = {Homepage: https://statistical-network-analysis-with-Julia.github.io/TERGM.jl; GitHub: https://github.com/statistical-network-analysis-with-Julia}
+}
+```
