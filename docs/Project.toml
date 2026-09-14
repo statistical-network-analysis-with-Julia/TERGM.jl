@@ -1,0 +1,13 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+ERGM = "d623cd87-b018-4e2a-bf53-b77ebcdc9da2"
+Networks = "027a387e-e55f-4537-a155-5037e5a23bdb"
+TERGM = "6fc22812-126d-4a5c-ac3d-a5f62b7af224"
+
+[sources]
+TERGM = {path = ".."}
+ERGM = {path = "../../ERGM.jl"}
+Networks = {path = "../../Networks.jl"}
+
+[compat]
+Documenter = "1"

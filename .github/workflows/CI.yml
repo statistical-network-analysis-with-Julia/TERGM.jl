@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+jobs:
+  test:
+    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          # The ecosystem requires Julia >= 1.12.
+          - '1.12'
+          - '1'
+          - 'nightly'
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        arch:
+          - x64
+        exclude:
+          - version: 'nightly'
+            os: macos-latest
+          - version: 'nightly'
+            os: windows-latest
+    steps:
+      # The fifteen packages are independent repositories that find each other
+      # through [sources] path dependencies (`Networks = {path = "../Networks.jl"}`).
+      # A lone checkout has no siblings, so those paths dangle and Pkg fails to
+      # resolve before a single test runs. Rebuild the layout every developer has
+      # locally: this package in a directory named after it, siblings beside it.
+      - uses: actions/checkout@v4
+        with:
+          path: TERGM.jl
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.version }}
+          arch: ${{ matrix.arch }}
+
+      # The clone list is derived from the `[sources]` tables of Project.toml
+      # and docs/Project.toml by parsing them (TOML.jl is a stdlib): exactly
+      # the siblings this package's path dependencies point at, nothing
+      # hand-maintained. A `[sources]` entry without a clone here would
+      # dangle; a clone without an entry is dead weight (TERGM used to clone
+      # NetworkDynamic, which it does not depend on). The package's own
+      # `{path = ".."}` entry in docs/Project.toml is skipped. The test suite
+      # ("Workflows derive their clone lists from [sources]") asserts this
+      # step never regains a literal package list.
+      - name: Reconstruct the ecosystem layout
+        shell: bash
+        run: |
+          org=https://github.com/statistical-network-analysis-with-Julia
+          pkgs=$(julia -e '
+            using TOML
+            siblings = Set{String}()
+            for f in ("TERGM.jl/Project.toml", "TERGM.jl/docs/Project.toml")
+                for (pkg, spec) in get(TOML.parsefile(f), "sources", Dict{String,Any}())
+                    pkg == "TERGM" && continue
+                    push!(siblings, pkg)
+                end
+            end
+            foreach(println, sort!(collect(siblings)))')
+          echo "siblings from [sources]: $pkgs"
+          for pkg in $pkgs; do
+            git clone --depth 1 --quiet "$org/$pkg.jl" "$pkg.jl"
+          done
+
+      - uses: julia-actions/cache@v2
+
+      # One cell runs multi-threaded: the block bootstrap refits on every
+      # thread through Networks.bootstrap_cov, and the suite asserts the
+      # replicates are thread-count independent.
+      - name: Run tests
+        shell: bash
+        working-directory: TERGM.jl
+        env:
+          JULIA_NUM_THREADS: ${{ (matrix.version == '1' && matrix.os == 'ubuntu-latest') && '4' || '1' }}
+        run: julia --project=. -e 'using Pkg; Pkg.test(coverage=true)'
+
+      - uses: julia-actions/julia-processcoverage@v1
+        if: matrix.version == '1' && matrix.os == 'ubuntu-latest'
+        with:
+          directories: TERGM.jl/src
+
+      - uses: codecov/codecov-action@v4
+        if: matrix.version == '1' && matrix.os == 'ubuntu-latest'
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false

@@ -1,0 +1,302 @@
+name = "panel_stergm"
+
+[provenance]
+r_version = "4.6.1"
+tergm_version = "4.2.2"
+btergm_version = "1.11.1"
+ergm_version = "4.12.0"
+network_version = "1.20.0"
+seed = 20260713
+script = "test/fixtures/r/panel_stergm.R"
+date = "2026-09-12"
+dataset = "simulated: 25 actors, 8 directed waves, alternating two-group `grp` attribute; drawn from the separable dyad-independent STERGM whose parameters are in [values].generating_* -- the waves themselves are frozen below, nothing is re-simulated in Julia"
+model = "Form(~edges + nodematch(\"grp\")) + Persist(~edges + nodematch(\"grp\")), estimate=\"CMPLE\", times=1:8"
+bootstrap = "btergm-style block bootstrap: 400 resamples of the 7 transitions with replacement, refit by glm"
+bootstrap_seeds = "101,202,303,404,505"
+boundary_seed = 20260912
+boundary_dataset = "simulated: 8 actors, 3 directed waves, alternating two-group `grp`; every same-group tie dissolves at the next wave (persistence nodematch at its smallest attainable value), cross-group ties persist at 0.6, formation at 0.3"
+boundary_model = "Form(~edges + nodematch(\"grp\")) + Persist(~edges + nodematch(\"grp\")), estimate=\"CMPLE\", times=1:3"
+dyaddep_models = "on the main panel: Form(~edges + mutual) + Persist(~edges + mutual) and Form(~edges + triangle) + Persist(~edges), estimate=\"CMPLE\", times=1:8"
+undirected_seed = 20260913
+undirected_dataset = "simulated: 14 actors, 5 UNDIRECTED waves, alternating two-group `grp`; drawn from a separable chain (formation 0.18 same-group / 0.08 cross, persistence 0.75 / 0.6); the upper triangles are frozen below"
+undirected_models = "Form(~edges + nodematch(\"grp\")) + Persist(~edges + triangle) and Form(~edges + kstar(2)) + Persist(~edges), estimate=\"CMPLE\", times=1:5"
+expand_models = "expanding terms under R labels: on the undirected panel with a three-level `grp3` (a,b,c repeating), Form(~edges + nodefactor(\"grp3\")) + Persist(~edges + nodemix(\"grp3\")) and Form(~edges + degree(1:2)) + Persist(~edges + degree(0:1)); on the main directed panel Form(~edges + nodefactor(\"grp\")) + Persist(~edges + nodemix(\"grp\")) and Form(~edges + nodemix(\"grp\")) + Persist(~edges + odegree(0:1)); estimate=\"CMPLE\""
+
+[tolerance]
+# CMPLE COEFFICIENTS AND STANDARD ERRORS. edges + nodematch is
+# dyad-independent, so the conditional pseudo-likelihood IS the conditional
+# likelihood: CMPLE is the exact conditional MLE and both packages are
+# maximizing the same strictly-concave logistic likelihood on the same rows.
+# No Monte Carlo, no approximation, nothing to average over. The ONLY
+# difference two correct implementations can have here is where their
+# optimizers stop -- and on this model that difference is measurable, and it
+# is R's, not Julia's:
+#
+#   tergm's CMPLE runs R's `glm` at its default epsilon = 1e-8 and stops
+#   there. Against the same glm taken to epsilon = 1e-14, tergm's shipped
+#   answer is off by ~1.5e-8 in the coefficients and ~6e-6 in the standard
+#   errors (the SEs are the more sensitive of the two, being a function of
+#   the fitted probabilities). TERGM.jl's Newton-Raphson lands on the exact
+#   optimum and reproduces the tightly-converged R glm to ~1e-10.
+#
+# So `coefficients`/`std_errors` are compared to tergm AS SHIPPED at a
+# tolerance that covers tergm's own optimizer slack -- 1e-6 on the
+# coefficients (60x the observed slack) and 1e-4 on the standard errors
+# (16x the observed slack, and still 0.13% of the smallest SE in the model,
+# far too tight for any real discrepancy to hide under). Widening the SE
+# tolerance is not a concession: `exact_std_errors` below is the same
+# estimator taken to convergence, and THAT is asserted at 1e-6, where
+# TERGM.jl passes with four orders of magnitude to spare. The loose number
+# measures R; the tight number measures Julia.
+coefficients = 1e-6
+std_errors = 1e-4
+exact_coefficients = 1e-6
+exact_std_errors = 1e-6
+# The per-side vectors are the same numbers split by side (`Form(1)~` rows
+# into `formation_*`, `Persist(1)~` rows into `persistence_*`) and carry the
+# same tolerances: they exist so that the accessors `formation_coef(fit)`,
+# `formation_se(fit)`, `persistence_coef(fit)`, `persistence_se(fit)` can be
+# pinned BY NAME against tergm's Persist() block (the persistence sign
+# convention: tergm >= 4 Persist(), positive = ties last longer).
+formation_coefficients = 1e-6
+formation_std_errors = 1e-4
+persistence_coefficients = 1e-6
+persistence_std_errors = 1e-4
+#
+# BLOCK-BOOTSTRAP STANDARD ERRORS. A bootstrap SE is a random variable: R
+# and Julia draw different resamples of the transitions, so they cannot
+# agree to machine precision however correct both are. Read
+# `boot_se_seed_sd` in [values] first -- that is THIS bootstrap, rerun under
+# five further seeds, disagreeing with itself. With only 7 transitions to
+# resample the block bootstrap is coarse by construction and that sd is
+# large relative to the SE itself; no cross-implementation tolerance can
+# sit below it. The tolerance is 3x the largest such sd, which is the
+# honest resolution of the comparison. It is deliberately NOT used to make
+# a claim the data cannot support: what this checks is that TERGM.jl's
+# bootstrap SEs agree with R's to within the noise of the bootstrap itself,
+# not that they are equal.
+#
+# Measured on the Julia side (mean of 5 TERGM.jl bootstraps at declared
+# seeds, 400 resamples each): |mean(TERGM.jl) - R| = 0.0032, 0.0040,
+# 0.0006, 0.0071. TERGM.jl's own seed-to-seed sd is 0.0023, 0.0023, 0.0009,
+# 0.0051 -- the same order as R's. The largest gap (0.0071, on persistence
+# nodematch) is 1.7x R's seed-to-seed sd on that SE, i.e. the two bootstraps
+# differ by about as much as either differs from itself. Both sides are
+# seeded, so the Julia comparison is deterministic and cannot flake.
+boot_std_errors = 0.01256
+#
+# THE BOUNDARY PANEL. The persistence nodematch has no finite CMPLE (no
+# same-group tie ever persists). TERGM.jl fixes it at -Inf and fits the rest
+# on the untouched rows, as R ergm's drop=TRUE does; tergm 4.2.2 warns
+# "The MPLE does not exist!" and returns a point on the asymptote. The
+# FINITE coefficients are the same estimator on the same rows in both
+# packages (the asymptote's rows contribute nothing to them), so they are
+# compared exactly as the main panel's: against tergm as shipped at a
+# tolerance covering glm's default-epsilon slack (`boundary_cmple_vs_glm_*`
+# in [values] measures it), and against the tightly converged glm at 1e-6.
+# The log-likelihood differs by the asymptote's tail -- the dropped rows at
+# tergm's finite point contribute sum(log(1 - p)) with p ~ 1e-8, frozen as
+# `boundary_asymptote_tail` -- plus glm's slack; 1e-5 covers both by two
+# orders of magnitude. The infinite coefficient is asserted by SIGN only
+# (`boundary_fixed_sign`): R's -19.6 is where glm stopped, not a number.
+boundary_finite_coefficients = 1e-6
+boundary_finite_std_errors = 1e-4
+boundary_exact_finite_coefficients = 1e-6
+boundary_exact_finite_std_errors = 1e-6
+boundary_loglik = 1e-5
+#
+# DYAD-DEPENDENT AND UNDIRECTED CMPLE. tergm as shipped (glm at its default
+# epsilon), compared at the main panel's as-shipped tolerances: 1e-6 on the
+# coefficients and 1e-4 on the standard errors -- two and one orders of
+# magnitude above the optimizer slack measured on the main panel (1.5e-8 /
+# 6.1e-6), and two orders of magnitude below the smallest standard error
+# in any of these models. The log-likelihood at 1e-5 (glm's stopping slack
+# in the deviance is ~1e-9). A dyad-dependent CMPLE is a deterministic
+# function of the panel and the change statistics, so two correct
+# implementations agree on it to the optimizer's slack exactly as they do on
+# the independent formula; what these keys pin is the evaluation of mutual /
+# triangle / kstar change statistics ON Y+ and Y- and the undirected
+# n(n-1)/2 free-dyad enumeration (`undirected_loglik_nobs`), not the
+# adequacy of the approximation.
+#
+# EXPANDING TERMS (nodefactor / nodemix / degree ranges). The same estimator
+# on the same rows once the columns are the same, so the as-shipped
+# tolerances apply; what these keys pin is that the columns ARE the same --
+# `<prefix>_term_names` is asserted verbatim, so a pooled or mislabelled
+# expansion fails on the names before any number is compared.
+dyaddep_mutual_coefficients = 1e-6
+dyaddep_mutual_std_errors = 1e-4
+dyaddep_mutual_loglik = 1e-5
+dyaddep_triangle_coefficients = 1e-6
+dyaddep_triangle_std_errors = 1e-4
+dyaddep_triangle_loglik = 1e-5
+undirected_coefficients = 1e-6
+undirected_std_errors = 1e-4
+undirected_loglik = 1e-5
+undirected_kstar_coefficients = 1e-6
+undirected_kstar_std_errors = 1e-4
+undirected_kstar_loglik = 1e-5
+expand_undirected_coefficients = 1e-6
+expand_undirected_std_errors = 1e-4
+expand_undirected_loglik = 1e-5
+expand_undirected_degree_coefficients = 1e-6
+expand_undirected_degree_std_errors = 1e-4
+expand_undirected_degree_loglik = 1e-5
+expand_directed_coefficients = 1e-6
+expand_directed_std_errors = 1e-4
+expand_directed_loglik = 1e-5
+expand_directed_degree_coefficients = 1e-6
+expand_directed_degree_std_errors = 1e-4
+expand_directed_degree_loglik = 1e-5
+
+[values]
+# --- the panel, frozen. Julia rebuilds these exact networks. -------------
+n_actors = 25
+n_waves = 8
+directed = true
+grp = ["a", "b", "a", "b", "a", "b", "a", "b", "a", "b", "a", "b", "a", "b", "a", "b", "a", "b", "a", "b", "a", "b", "a", "b", "a"]
+edge_counts = [68, 121, 165, 183, 209, 213, 218, 212]
+wave_src = [[21, 13, 7, 12, 23, 14, 22, 25, 11, 12, 14, 22, 23, 24, 11, 17, 18, 21, 22, 1, 3, 12, 21, 22, 5, 13, 14, 20, 12, 13, 24, 1, 6, 7, 24, 9, 5, 23, 16, 8, 14, 19, 5, 2, 13, 21, 22, 24, 1, 15, 17, 21, 22, 12, 14, 11, 19, 4, 5, 9, 12, 24, 1, 5, 6, 10, 23, 24], [18, 23, 13, 17, 1, 7, 12, 22, 23, 8, 10, 18, 22, 25, 3, 8, 9, 11, 15, 21, 22, 23, 2, 8, 11, 14, 19, 20, 5, 9, 10, 11, 15, 17, 18, 21, 24, 1, 12, 14, 5, 8, 21, 24, 8, 9, 11, 13, 14, 15, 2, 9, 12, 13, 24, 1, 6, 9, 17, 20, 3, 9, 21, 5, 11, 12, 17, 23, 7, 9, 8, 14, 22, 3, 5, 7, 10, 2, 13, 20, 21, 22, 24, 15, 17, 21, 22, 25, 2, 12, 14, 22, 7, 11, 14, 16, 24, 25, 5, 8, 9, 12, 14, 19, 24, 1, 2, 5, 6, 10, 12, 14, 17, 21, 5, 6, 13, 23, 7, 20, 24], [3, 9, 18, 20, 23, 7, 17, 1, 7, 11, 12, 14, 20, 22, 23, 2, 8, 10, 18, 20, 22, 25, 1, 3, 7, 8, 9, 11, 15, 21, 22, 23, 2, 3, 8, 11, 12, 14, 19, 20, 5, 9, 11, 13, 15, 17, 21, 24, 14, 18, 24, 3, 4, 5, 8, 16, 19, 21, 24, 7, 8, 9, 11, 18, 9, 10, 12, 13, 15, 25, 1, 6, 9, 10, 17, 23, 24, 3, 7, 9, 15, 21, 5, 11, 12, 13, 22, 23, 7, 8, 9, 17, 21, 22, 23, 8, 14, 21, 22, 3, 5, 6, 23, 2, 3, 6, 7, 13, 17, 20, 21, 22, 24, 1, 11, 16, 17, 21, 22, 23, 25, 2, 3, 6, 12, 18, 22, 3, 7, 10, 11, 13, 14, 15, 24, 25, 4, 8, 9, 12, 13, 14, 17, 19, 21, 24, 1, 5, 7, 10, 14, 17, 21, 2, 6, 13, 16, 17, 21, 23, 2, 7, 20, 21, 24], [9, 10, 18, 19, 23, 7, 16, 17, 1, 5, 6, 7, 8, 11, 19, 20, 21, 23, 25, 2, 8, 10, 18, 20, 22, 1, 3, 7, 8, 11, 15, 21, 22, 23, 2, 3, 8, 12, 19, 20, 25, 1, 5, 6, 9, 13, 15, 17, 19, 20, 21, 1, 2, 14, 16, 17, 18, 24, 3, 4, 5, 12, 13, 16, 17, 19, 21, 24, 25, 2, 7, 8, 9, 11, 14, 18, 9, 13, 15, 4, 6, 9, 10, 11, 16, 23, 24, 3, 5, 6, 7, 9, 15, 21, 2, 5, 12, 18, 22, 23, 9, 17, 19, 20, 21, 22, 23, 6, 8, 11, 14, 18, 21, 22, 3, 5, 6, 12, 18, 24, 6, 7, 13, 17, 20, 21, 22, 24, 25, 1, 4, 7, 11, 17, 21, 23, 25, 2, 6, 12, 16, 18, 22, 24, 25, 1, 3, 7, 9, 11, 13, 15, 19, 4, 8, 9, 12, 17, 21, 24, 1, 5, 7, 10, 14, 17, 22, 2, 6, 11, 13, 14, 16, 17, 21, 23, 2, 4, 7, 16, 20, 21, 24], [2, 5, 9, 10, 19, 21, 6, 8, 16, 19, 1, 5, 6, 11, 19, 20, 21, 23, 25, 2, 8, 10, 11, 16, 18, 22, 1, 3, 7, 8, 11, 13, 16, 18, 19, 21, 23, 25, 2, 4, 12, 20, 23, 1, 3, 5, 13, 15, 17, 20, 21, 22, 2, 5, 9, 14, 15, 16, 18, 23, 24, 1, 3, 4, 5, 12, 13, 16, 17, 19, 20, 21, 22, 24, 25, 2, 6, 7, 8, 11, 14, 18, 25, 1, 3, 9, 12, 13, 15, 25, 1, 4, 6, 9, 10, 16, 23, 24, 3, 5, 6, 7, 15, 18, 19, 20, 21, 25, 2, 4, 10, 11, 12, 18, 23, 1, 3, 9, 13, 17, 18, 19, 23, 2, 5, 6, 7, 8, 9, 10, 14, 18, 22, 3, 5, 6, 11, 12, 25, 7, 11, 17, 20, 22, 24, 25, 1, 4, 7, 13, 17, 20, 21, 23, 24, 4, 6, 10, 12, 16, 22, 1, 3, 7, 9, 10, 11, 19, 4, 8, 9, 12, 13, 17, 24, 1, 5, 7, 8, 10, 11, 13, 14, 15, 17, 19, 20, 22, 2, 3, 6, 14, 15, 16, 18, 20, 21, 22, 23, 1, 2, 4, 9, 11, 13, 16, 20, 21, 24], [2, 5, 9, 10, 13, 15, 21, 25, 6, 8, 16, 19, 1, 5, 7, 10, 11, 16, 19, 21, 23, 25, 2, 3, 8, 10, 17, 18, 22, 1, 3, 8, 11, 13, 17, 18, 19, 21, 22, 23, 25, 2, 12, 20, 23, 1, 4, 5, 12, 13, 15, 20, 22, 25, 2, 6, 9, 11, 12, 14, 18, 24, 1, 3, 4, 5, 7, 12, 14, 20, 22, 24, 25, 2, 8, 14, 18, 25, 1, 9, 13, 15, 18, 25, 1, 4, 10, 16, 23, 2, 3, 6, 7, 10, 12, 15, 19, 20, 21, 2, 4, 10, 11, 12, 18, 23, 25, 1, 3, 7, 9, 13, 17, 18, 19, 2, 3, 5, 7, 8, 10, 14, 18, 20, 21, 22, 2, 3, 12, 19, 23, 25, 4, 6, 8, 11, 17, 20, 22, 24, 25, 1, 2, 4, 7, 10, 13, 15, 16, 17, 18, 20, 21, 22, 23, 24, 4, 12, 15, 16, 18, 1, 3, 5, 7, 9, 11, 15, 17, 19, 24, 1, 4, 8, 12, 14, 17, 19, 23, 1, 3, 7, 9, 13, 15, 17, 19, 20, 21, 2, 3, 4, 5, 8, 10, 14, 15, 16, 17, 18, 20, 1, 2, 6, 8, 10, 11, 13, 16, 17, 19, 20, 21], [2, 3, 9, 10, 15, 17, 18, 19, 21, 25, 6, 8, 14, 16, 18, 19, 1, 5, 7, 10, 11, 13, 14, 15, 16, 19, 23, 2, 6, 8, 15, 17, 18, 22, 25, 1, 3, 12, 13, 17, 19, 22, 25, 2, 12, 16, 20, 22, 1, 3, 5, 6, 12, 13, 15, 20, 22, 2, 6, 10, 12, 14, 18, 20, 24, 4, 7, 11, 12, 14, 18, 20, 22, 24, 25, 2, 8, 13, 14, 18, 25, 7, 9, 10, 13, 15, 18, 4, 10, 13, 16, 19, 23, 24, 1, 2, 3, 5, 6, 7, 10, 15, 21, 2, 4, 7, 10, 11, 12, 16, 18, 21, 25, 3, 5, 7, 9, 11, 16, 17, 18, 19, 2, 5, 7, 8, 10, 18, 20, 22, 2, 3, 4, 11, 13, 15, 19, 21, 23, 25, 4, 6, 8, 10, 17, 20, 22, 23, 24, 25, 1, 4, 7, 11, 13, 15, 16, 17, 20, 21, 22, 23, 24, 4, 8, 12, 16, 18, 19, 25, 1, 3, 5, 9, 15, 18, 19, 20, 23, 1, 8, 12, 13, 17, 23, 24, 1, 3, 5, 9, 13, 15, 17, 19, 20, 21, 22, 2, 4, 8, 10, 11, 12, 14, 15, 16, 17, 18, 23, 8, 9, 10, 11, 17, 19, 20, 21, 23], [3, 9, 10, 17, 18, 19, 21, 22, 4, 6, 8, 14, 16, 18, 22, 1, 5, 7, 11, 15, 17, 19, 23, 2, 8, 10, 17, 18, 22, 23, 25, 1, 3, 7, 13, 23, 25, 2, 4, 12, 14, 15, 16, 20, 22, 1, 3, 5, 8, 12, 13, 15, 16, 20, 22, 2, 5, 6, 10, 14, 16, 18, 24, 4, 7, 11, 12, 14, 15, 16, 25, 2, 13, 14, 18, 25, 6, 7, 10, 13, 14, 15, 4, 8, 10, 16, 17, 18, 21, 24, 2, 3, 10, 14, 15, 16, 17, 1, 2, 6, 7, 10, 11, 12, 16, 18, 21, 23, 3, 5, 7, 9, 11, 16, 17, 18, 19, 22, 1, 2, 4, 5, 8, 10, 18, 20, 22, 1, 2, 3, 4, 7, 11, 12, 13, 18, 19, 23, 24, 25, 2, 4, 6, 8, 10, 17, 20, 22, 23, 25, 3, 4, 5, 7, 9, 13, 14, 15, 17, 21, 22, 3, 6, 7, 12, 18, 19, 1, 3, 5, 9, 13, 18, 19, 20, 23, 2, 8, 11, 12, 17, 21, 23, 1, 3, 4, 5, 13, 15, 17, 19, 20, 21, 2, 8, 10, 12, 14, 16, 17, 18, 20, 21, 9, 11, 13, 14, 15, 19, 21, 22, 23]]
+wave_dst = [[1, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 7, 7, 7, 7, 8, 8, 8, 8, 8, 9, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12, 13, 14, 14, 15, 16, 16, 16, 17, 18, 18, 18, 18, 18, 19, 19, 19, 19, 19, 20, 20, 21, 21, 22, 22, 22, 22, 22, 23, 23, 23, 23, 24, 25], [1, 1, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 13, 13, 13, 14, 14, 14, 14, 14, 15, 15, 16, 16, 16, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 19, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 22, 22, 22, 22, 22, 22, 22, 23, 23, 23, 23, 23, 23, 23, 23, 23, 24, 24, 24, 24, 25, 25, 25], [1, 1, 1, 1, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 23, 23, 23, 23, 23, 23, 23, 24, 24, 24, 24, 24, 24, 24, 25, 25, 25, 25, 25], [1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 22, 22, 22, 22, 22, 22, 22, 23, 23, 23, 23, 23, 23, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 25, 25, 25, 25, 25, 25, 25], [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 22, 22, 22, 22, 22, 22, 22, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25], [1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 22, 22, 22, 22, 22, 22, 22, 22, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 22, 22, 22, 22, 22, 22, 22, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 25, 25, 25, 25, 25, 25, 25, 25, 25], [1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 22, 22, 22, 22, 22, 22, 22, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 25, 25, 25, 25, 25, 25, 25, 25, 25]]
+
+# The parameters the panel was drawn from. NOT an assertion target -- the
+# estimator is being compared to R, not to truth -- but a sanity anchor: a
+# fit that lands far from these on 7 transitions of 600 dyads is suspicious.
+generating_formation = [-2.2000000000000002, 0.80000000000000004]
+generating_persistence = [0.5, 0.90000000000000002]
+
+# --- tergm CMPLE: exact conditional MLE, compared at 1e-6 ---------------
+term_names = ["Form(1)~edges", "Form(1)~nodematch.grp", "Persist(1)~edges", "Persist(1)~nodematch.grp"]
+coefficients = [-2.0947089970830519, 0.67389344159636522, 0.40546510810816427, 1.1823670255907319]
+std_errors = [0.075885357384548394, 0.1043494899967911, 0.10143010324169698, 0.1395767460627334]
+# Formation and persistence split out, in TERGM.jl's own accessor order.
+formation_coefficients = [-2.0947089970830519, 0.67389344159636522]
+formation_std_errors = [0.075885357384548394, 0.1043494899967911]
+persistence_coefficients = [0.40546510810816427, 1.1823670255907319]
+persistence_std_errors = [0.10143010324169698, 0.1395767460627334]
+
+# --- the SAME estimator, taken to convergence ---------------------------
+# R glm at epsilon = 1e-14 rather than tergm's default 1e-8. This is where
+# the exact conditional MLE actually is, and it is what TERGM.jl reproduces
+# (to ~1e-10). Asserted at 1e-6.
+exact_coefficients = [-2.0947090138106215, 0.67389345832250158, 0.40546510810816522, 1.1823670256113545]
+exact_std_errors = [0.075891489970864895, 0.10435398242028061, 0.10143010268157328, 0.13957691747240911]
+
+# How far tergm AS SHIPPED sits from that exact optimum. This is the
+# entire residual disagreement between TERGM.jl and tergm on this model:
+# it is R's optimizer slack, and it is why `std_errors` above is compared
+# at 1e-4 while `exact_std_errors` is compared at 1e-6.
+cmple_vs_glm_max_abs_diff = 1.6727569551733268e-08
+cmple_se_vs_glm_max_abs_diff = 6.1325863165012651e-06
+
+# --- btergm-style block bootstrap over the 7 transitions ----------------
+boot_std_errors = [0.054509579623374119, 0.058730710492372794, 0.089496423290352428, 0.11738489181236095]
+# The same bootstrap under five further seeds, disagreeing with itself.
+boot_se_seed_sd = [0.001085165874396863, 0.002658233608996384, 0.0027923766359430457, 0.0041856901035173446]
+boot_se_seed_mean = [0.053781980535820707, 0.055609111404818348, 0.091134100659260975, 0.124480925642663]
+
+# --- the boundary panel, frozen ------------------------------------------
+boundary_n_actors = 8
+boundary_n_waves = 3
+boundary_grp = ["a", "b", "a", "b", "a", "b", "a", "b"]
+boundary_edge_counts = [15, 24, 26]
+boundary_wave_src = [[2, 5, 1, 3, 4, 7, 8, 6, 1, 5, 7, 1, 3, 2, 7], [2, 7, 8, 1, 3, 5, 6, 7, 1, 4, 5, 7, 8, 1, 5, 7, 2, 2, 3, 4, 8, 5, 6, 7], [2, 5, 6, 8, 1, 3, 7, 2, 4, 8, 2, 5, 6, 7, 8, 6, 7, 8, 3, 7, 6, 8, 2, 4, 5, 6]]
+boundary_wave_dst = [[1, 1, 2, 2, 2, 2, 2, 3, 4, 4, 5, 6, 6, 8, 8], [1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 5, 6, 6, 6, 6, 7, 7, 8], [1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 6, 6, 7, 7, 8, 8, 8, 8]]
+# tergm AS SHIPPED. Coefficient 4 (Persist~nodematch.grp) is a point on the
+# asymptote, NOT an assertion target; TERGM.jl reports -Inf there.
+boundary_term_names = ["Form(1)~edges", "Form(1)~nodematch.grp", "Persist(1)~edges", "Persist(1)~nodematch.grp"]
+boundary_coefficients = [-0.5798184952529416, 0.5798184952529416, 1.152679509938386, -19.573745850069901]
+boundary_std_errors = [0.33380918415851202, 0.47861845999929914, 0.4682929057908472, 1621.3340233378169]
+boundary_warnings = ["The MPLE does not exist!"]
+boundary_finite_index = [1, 2, 3]
+boundary_fixed_index = 4
+boundary_fixed_sign = -1
+boundary_finite_coefficients = [-0.5798184952529416, 0.5798184952529416, 1.152679509938386]
+boundary_finite_std_errors = [0.33380918415851202, 0.47861845999929914, 0.4682929057908472]
+# The exact limit of the pseudo-likelihood (glm at epsilon = 1e-14 on the rows
+# the dropped statistic does not touch): what TERGM.jl reproduces.
+boundary_exact_finite_coefficients = [-0.57981849525294238, 0.57981849525294182, 1.1526795099383857]
+boundary_exact_finite_std_errors = [0.3338091841585108, 0.47861845999929825, 0.46829290579052912]
+boundary_cmple_vs_glm_max_abs_diff = 7.7715611723760958e-16
+boundary_cmple_se_vs_glm_max_abs_diff = 3.1807889655510735e-13
+boundary_loglik = -62.804208443896059
+boundary_dropped_loglik = -62.804208303950034
+boundary_asymptote_tail = -1.3994602635627226e-07
+# R's logLik attributes. tergm counts all 4 coefficients (it did not drop);
+# TERGM.jl's dof() counts the 3 finite ones and its BIC sample size is the
+# untouched free dyads (`boundary_n_kept`), R ergm's drop convention.
+boundary_loglik_df = 4
+boundary_loglik_nobs = 112
+boundary_n_formation_rows = 73
+boundary_n_persistence_rows = 39
+boundary_n_kept = 98
+
+# --- dyad-dependent CMPLE on the main panel (tergm as shipped) ------------
+dyaddep_mutual_term_names = ["Form(1)~edges", "Form(1)~mutual", "Persist(1)~edges", "Persist(1)~mutual"]
+dyaddep_mutual_coefficients = [-1.7917594687347442, 0.036813972895129339, 1.1104467463151109, -0.026433257068153398]
+dyaddep_mutual_std_errors = [0.065611955974652095, 0.10663280469799775, 0.077038131449959565, 0.15915271808749087]
+dyaddep_mutual_loglik = -1909.3792123856667
+dyaddep_mutual_loglik_df = 4
+dyaddep_mutual_loglik_nobs = 4200
+dyaddep_mutual_warnings = []
+dyaddep_triangle_term_names = ["Form(1)~edges", "Form(1)~triangle", "Persist(1)~edges"]
+dyaddep_triangle_coefficients = [-2.0406485810278241, 0.019416038041968668, 1.1042844536205745]
+dyaddep_triangle_std_errors = [0.12031056513859431, 0.0078538462542256122, 0.067410613540955525]
+dyaddep_triangle_loglik = -1906.4007246301901
+dyaddep_triangle_loglik_df = 3
+dyaddep_triangle_loglik_nobs = 4200
+dyaddep_triangle_warnings = []
+
+# --- the undirected panel, frozen (upper triangles) -----------------------
+undirected_n_actors = 14
+undirected_n_waves = 5
+undirected_grp = ["a", "b", "a", "b", "a", "b", "a", "b", "a", "b", "a", "b", "a", "b"]
+undirected_edge_counts = [16, 21, 31, 25, 27]
+undirected_wave_src = [[1, 3, 5, 3, 3, 5, 2, 3, 4, 6, 7, 11, 12, 2, 8, 10], [1, 2, 2, 2, 3, 2, 5, 1, 3, 7, 8, 2, 6, 6, 8, 11, 12, 2, 8, 12, 13], [1, 2, 1, 2, 3, 3, 1, 2, 5, 6, 1, 3, 2, 4, 7, 8, 9, 2, 6, 8, 5, 6, 10, 11, 11, 12, 2, 8, 10, 12, 13], [1, 2, 1, 3, 3, 2, 5, 1, 2, 6, 1, 2, 4, 6, 8, 2, 9, 10, 3, 11, 2, 6, 9, 10, 12], [1, 2, 1, 3, 2, 3, 5, 1, 6, 5, 4, 5, 8, 2, 3, 9, 8, 10, 1, 3, 10, 11, 2, 6, 9, 10, 12]]
+undirected_wave_dst = [[3, 5, 7, 9, 10, 10, 11, 12, 13, 13, 13, 13, 13, 14, 14, 14], [3, 3, 4, 5, 5, 7, 7, 9, 9, 10, 10, 11, 11, 12, 13, 13, 13, 14, 14, 14, 14], [3, 3, 4, 4, 5, 6, 7, 7, 7, 8, 9, 9, 10, 10, 10, 10, 10, 11, 11, 11, 12, 12, 12, 12, 13, 13, 14, 14, 14, 14, 14], [3, 3, 5, 5, 6, 7, 7, 8, 8, 8, 9, 10, 10, 10, 10, 11, 11, 12, 13, 13, 14, 14, 14, 14, 14], [3, 3, 5, 5, 6, 6, 7, 8, 8, 9, 10, 10, 10, 11, 11, 11, 12, 12, 13, 13, 13, 13, 14, 14, 14, 14, 14]]
+undirected_term_names = ["Form(1)~edges", "Form(1)~nodematch.grp", "Persist(1)~edges", "Persist(1)~triangle"]
+undirected_coefficients = [-2.1365999518252279, 0.75030559070543978, 0.93089168052576277, -0.28110689681922263]
+undirected_std_errors = [0.25644288427869932, 0.35011585925311867, 0.26492642188404097, 0.41704430741442161]
+undirected_loglik = -166.0043895050197
+undirected_loglik_df = 4
+undirected_loglik_nobs = 364
+undirected_warnings = []
+undirected_kstar_term_names = ["Form(1)~edges", "Form(1)~kstar2", "Persist(1)~edges"]
+undirected_kstar_coefficients = [-0.67763089367838347, -0.13028817094828773, 0.84218275901446638]
+undirected_kstar_std_errors = [0.66396775416620379, 0.077648742951181987, 0.22604798169156484]
+undirected_kstar_loglik = -167.11061788667737
+undirected_kstar_loglik_df = 3
+undirected_kstar_loglik_nobs = 364
+undirected_kstar_warnings = []
+
+# --- expanding terms (tergm as shipped): the columns statnet resolves ------
+# `undirected_grp3` is a second attribute on the SAME frozen undirected panel
+undirected_grp3 = ["a", "b", "c", "a", "b", "c", "a", "b", "c", "a", "b", "c", "a", "b"]
+expand_undirected_term_names = ["Form(1)~edges", "Form(1)~nodefactor.grp3.b", "Form(1)~nodefactor.grp3.c", "Persist(1)~edges", "Persist(1)~mix.grp3.a.b", "Persist(1)~mix.grp3.b.b", "Persist(1)~mix.grp3.a.c", "Persist(1)~mix.grp3.b.c", "Persist(1)~mix.grp3.c.c"]
+expand_undirected_coefficients = [-1.9430069199698932, 0.18387513024665605, 0.051282171541564767, -0.51082562376599172, 1.5606477482646697, 1.4271163556401469, 1.1169614273363071, 2.1848020573376634, 1.0216512475319841]
+expand_undirected_std_errors = [0.38803270182071142, 0.30197630376361051, 0.32541639248396281, 0.73029674334022165, 0.85216810317635117, 0.93985814532377798, 0.88933069828331024, 0.96393291052922769, 1.0327955589886444]
+expand_undirected_loglik = -165.19474834669978
+expand_undirected_loglik_df = 9
+expand_undirected_loglik_nobs = 364
+expand_undirected_warnings = []
+expand_undirected_degree_term_names = ["Form(1)~edges", "Form(1)~degree1", "Form(1)~degree2", "Persist(1)~edges", "Persist(1)~degree0", "Persist(1)~degree1"]
+expand_undirected_degree_coefficients = [-1.8573905035021645, -0.63043744742967489, -0.2337956622527296, 0.36390082247514127, -1.1191278446733894, -0.95281906625582746]
+expand_undirected_degree_std_errors = [0.20048099980222045, 0.76028563687213413, 0.38639677706380116, 0.31637070363812553, 0.79501620216588709, 0.42717028106540106]
+expand_undirected_degree_loglik = -165.36269614674691
+expand_undirected_degree_loglik_df = 6
+expand_undirected_degree_loglik_nobs = 364
+expand_undirected_degree_warnings = []
+expand_directed_term_names = ["Form(1)~edges", "Form(1)~nodefactor.grp.b", "Persist(1)~edges", "Persist(1)~mix.grp.b.a", "Persist(1)~mix.grp.a.b", "Persist(1)~mix.grp.b.b"]
+expand_directed_coefficients = [-1.5519746159313481, -0.23834086221417033, 1.4700373505340041, -1.0136806351294501, -1.1209863317059316, 0.2935512415742072]
+expand_directed_std_errors = [0.090421018353464694, 0.081134854045529864, 0.12173023799836892, 0.1857418407373056, 0.19080107473442653, 0.19804709929047651]
+expand_directed_loglik = -1867.499083219813
+expand_directed_loglik_df = 6
+expand_directed_loglik_nobs = 4200
+expand_directed_warnings = []
+expand_directed_degree_term_names = ["Form(1)~edges", "Form(1)~mix.grp.b.a", "Form(1)~mix.grp.a.b", "Form(1)~mix.grp.b.b", "Persist(1)~edges", "Persist(1)~odegree0", "Persist(1)~odegree1"]
+expand_directed_degree_coefficients = [-1.2617137990154015, -0.73460489473776691, -0.93674454735520829, -0.35175637691935518, 1.1033292785462474, 0.20132498756663356, -0.76847289835508947]
+expand_directed_degree_std_errors = [0.094726991210254158, 0.14067608516316893, 0.14599431228129559, 0.14521092342439235, 0.068720955248229298, 0.75842519968289612, 0.54146461711381566]
+expand_directed_degree_loglik = -1881.7183520475933
+expand_directed_degree_loglik_df = 7
+expand_directed_degree_loglik_nobs = 4200
+expand_directed_degree_warnings = []
