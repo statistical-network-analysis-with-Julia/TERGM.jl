@@ -626,6 +626,8 @@ after 0.2.0.
 
 - The sampler allocation regression measures the kernel on prepared inputs,
   keeping hash-dependent network-copy costs outside the per-step comparison.
+- Design-build allocation checks use repeated warmed samples to exclude
+  one-time runtime overhead while retaining the original memory bounds.
 - **Multi-column terms were fit as ONE pooled, mislabelled column** (panel
   2026-09 round 3, critical). `STERGMModel` bound the raw terms and skipped
   the expansion step every `ERGMModel` runs (ERGM.jl's public

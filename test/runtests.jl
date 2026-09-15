@@ -2233,13 +2233,17 @@ end
         end
         function overhead(model)
             TERGM._cmple_blocks(model)                       # warm up
-            total = @allocated TERGM._cmple_blocks(model)
+            # Measure steady-state allocations: a single sample may include
+            # one-time compiler/runtime work on a different Julia platform.
+            # A per-row allocation regression remains in every sample.
+            total = minimum(@allocated(TERGM._cmple_blocks(model)) for _ in 1:5)
             Xf, yf, Xd, yd = TERGM._cmple_blocks(model)
             arrays = sum(sizeof, Xf) + sum(sizeof, yf) + sum(sizeof, Xd) + sum(sizeof, yd)
             # the two auxiliary networks of every transition are copies of
             # Y_{t−1}: the data structure's cost, not the design build's
-            copies = sum(@allocated((formation_network(model.networks[t-1], model.networks[t]),
-                                     dissolution_network(model.networks[t-1], model.networks[t])))
+            copies = sum(minimum(@allocated((formation_network(model.networks[t-1], model.networks[t]),
+                                             dissolution_network(model.networks[t-1], model.networks[t])))
+                                 for _ in 1:5)
                          for t in 2:length(model.networks))
             rows = sum(size.(Xf, 1)) + sum(size.(Xd, 1))
             return rows, total - arrays - copies
