@@ -624,6 +624,8 @@ after 0.2.0.
 
 ### Fixed
 
+- The sampler allocation regression measures the kernel on prepared inputs,
+  keeping hash-dependent network-copy costs outside the per-step comparison.
 - **Multi-column terms were fit as ONE pooled, mislabelled column** (panel
   2026-09 round 3, critical). `STERGMModel` bound the raw terms and skipped
   the expansion step every `ERGMModel` runs (ERGM.jl's public

@@ -1086,13 +1086,21 @@ end
         # Measured at a coefficient no proposal is accepted at, so the only
         # per-step work is the kernel's: an accepted toggle grows the network's
         # adjacency lists, which is the data structure's cost, not the sampler's.
-        θ_never = [-30.0, 0.0, 0.0]
-        free_steps(steps) = (TERGM._sample_constrained(prev, terms, θ_never, :formation,
-                                                       steps, Random.Xoshiro(1)); nothing)
+        θ_never = [-Inf, 0.0, 0.0]
+        net = copy(prev)
+        free = [(i, j) for i in 1:Int(nv(prev)) for j in 1:Int(nv(prev))
+                if i != j && !has_edge(prev, i, j)]
+        snapshots = TERGM._materialized_tuple(terms, prev)
+        rng = Random.Xoshiro(1)
+        # Measure the kernel on prepared inputs. Copying attribute Dicts in
+        # `_sample_constrained` has a small, hash-layout-dependent setup cost.
+        free_steps(steps) = (TERGM._mh_constrained!(rng, net, prev, free, snapshots,
+                                                   θ_never, steps); nothing)
         free_steps(10)
         a1 = @allocated free_steps(1_000)
         a2 = @allocated free_steps(2_000)
         @test a2 == a1
+        @test edgeset(net) == edgeset(prev)
     end
 
     # ------------------------------------------------------------------
