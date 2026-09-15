@@ -2239,24 +2239,29 @@ end
             total = minimum(@allocated(TERGM._cmple_blocks(model)) for _ in 1:5)
             Xf, yf, Xd, yd = TERGM._cmple_blocks(model)
             arrays = sum(sizeof, Xf) + sum(sizeof, yf) + sum(sizeof, Xd) + sum(sizeof, yd)
-            # the two auxiliary networks of every transition are copies of
-            # Y_{t−1}: the data structure's cost, not the design build's
-            copies = sum(minimum(@allocated((formation_network(model.networks[t-1], model.networks[t]),
-                                             dissolution_network(model.networks[t-1], model.networks[t])))
-                                 for _ in 1:5)
-                         for t in 2:length(model.networks))
+            # Measure the auxiliary networks AND attribute snapshots. Their
+            # Dict capacity/alignment costs vary by platform and are not just
+            # one Int per vertex. Subtract the actual setup so this checks
+            # allocations introduced by assembling/filling the design rows.
+            setup = sum(minimum(@allocated(begin
+                            local setup_plus = formation_network(model.networks[t-1], model.networks[t])
+                            local setup_minus = dissolution_network(model.networks[t-1], model.networks[t])
+                            TERGM._materialized_tuple(model.formula.formation, setup_plus)
+                            TERGM._materialized_tuple(model.formula.dissolution, setup_minus)
+                            nothing
+                        end) for _ in 1:5)
+                        for t in 2:length(model.networks))
             rows = sum(size.(Xf, 1)) + sum(size.(Xd, 1))
-            return rows, total - arrays - copies
+            return rows, total - arrays - setup
         end
         n_trans = 7
         rows_small, over_small = overhead(build(25, n_trans + 1))
         rows_big, over_big = overhead(build(50, n_trans + 1))
         @test rows_big > 4 * rows_small
-        # 4x the rows, the same per-transition overhead: the only part that
-        # may grow with the actors is the attribute snapshot — one Int per
-        # vertex per attribute term (here: one term, 25 more vertices) — never
-        # anything per row (which would add ≥ 8 × 3 × 4 000 rows ≈ 96 KB here)
-        @test over_big <= over_small + n_trans * (8 * 25) + 1024
+        # 4x the rows, the same per-transition assembly overhead: never
+        # anything per row (which would add ≥ 8 × 3 × 4 000 rows ≈ 96 KB here).
+        # Snapshot growth is accounted for by the measured setup above.
+        @test over_big <= over_small + 1024
         @test over_big < n_trans * 4 * 1024
         # ... because the fill itself allocates nothing, attribute term included
         model = build(25, 8)
