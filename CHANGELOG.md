@@ -462,6 +462,8 @@ columns), with block-bootstrap SEs, StatsAPI accessors, and a shared
 
 ### Changed
 
+- Documentation uses the default Documenter themes, with a new package-specific
+  SVG icon and browser favicon in the official Julia logo colors.
 - **`_polish_newton` and `_specification` are gone** (reconciliation
   round). `Networks.newton_fit` adopted the scale-free convergence verdict
   TERGM requested — the Newton decrement `½·gᵀ(−H)⁻¹g < tol` beside the
