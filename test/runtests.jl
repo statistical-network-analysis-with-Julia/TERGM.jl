@@ -2268,8 +2268,11 @@ end
         # 4x the rows, the same per-transition assembly overhead: never
         # anything per row (which would add ≥ 8 × 3 × 4 000 rows ≈ 96 KB here).
         # Snapshot growth is accounted for by the measured setup above.
-        @test 0 <= over_small
-        @test 0 <= over_big <= over_small + 1024
+        # The separate baseline calls may retain small return objects that
+        # the builder inlines away (32 B on Windows). Bound that constant
+        # difference with the same 1 KiB allowance used for assembly overhead.
+        @test -1024 <= over_small
+        @test -1024 <= over_big <= over_small + 1024
         @test over_big < n_trans * 4 * 1024
         # ... because the fill itself allocates nothing, attribute term included
         model = build(25, 8)
