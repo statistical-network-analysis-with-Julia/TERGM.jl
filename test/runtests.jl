@@ -2231,6 +2231,9 @@ end
             end
             return STERGMModel(STERGM([Edges(), Mutual(), NodeMatch(:grp)], [Edges()]), nets)
         end
+        function allocate_outputs(Xf, yf, Xd, yd)
+            return map(similar, Xf), map(similar, yf), map(similar, Xd), map(similar, yd)
+        end
         function overhead(model)
             TERGM._cmple_blocks(model)                       # warm up
             # Measure steady-state allocations: a single sample may include
@@ -2238,7 +2241,11 @@ end
             # A per-row allocation regression remains in every sample.
             total = minimum(@allocated(TERGM._cmple_blocks(model)) for _ in 1:5)
             Xf, yf, Xd, yd = TERGM._cmple_blocks(model)
-            arrays = sum(sizeof, Xf) + sum(sizeof, yf) + sum(sizeof, Xd) + sum(sizeof, yd)
+            # sizeof counts payload, while @allocated includes the allocator's
+            # size classes (large arrays can have substantial padding on
+            # macOS). Measure like-for-like output buffers on this platform.
+            allocate_outputs(Xf, yf, Xd, yd)
+            arrays = minimum(@allocated(allocate_outputs(Xf, yf, Xd, yd)) for _ in 1:5)
             # Measure the auxiliary networks AND attribute snapshots. Their
             # Dict capacity/alignment costs vary by platform and are not just
             # one Int per vertex. Subtract the actual setup so this checks
@@ -2261,7 +2268,8 @@ end
         # 4x the rows, the same per-transition assembly overhead: never
         # anything per row (which would add ≥ 8 × 3 × 4 000 rows ≈ 96 KB here).
         # Snapshot growth is accounted for by the measured setup above.
-        @test over_big <= over_small + 1024
+        @test 0 <= over_small
+        @test 0 <= over_big <= over_small + 1024
         @test over_big < n_trans * 4 * 1024
         # ... because the fill itself allocates nothing, attribute term included
         model = build(25, 8)
