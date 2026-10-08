@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">TERGM.jl</title>
+  <desc id="desc">Forming and dissolving ties across time: separable temporal network models.</desc>
+  <path d="M51 77H205" fill="none" stroke="#389826" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M128 23V51M114 37H142" fill="none" stroke="#389826" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M51 180H205" fill="none" stroke="#CB3C33" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="17 19"/>
+  <path d="M114 220H142" fill="none" stroke="#CB3C33" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M128 109V145M115 132 128 145 141 132" fill="none" stroke="#9558B2" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="43" cy="77" r="21" fill="#4063D8"/>
+  <circle cx="213" cy="77" r="21" fill="#4063D8"/>
+  <circle cx="43" cy="180" r="21" fill="#4063D8"/>
+  <circle cx="213" cy="180" r="21" fill="#4063D8"/>
+</svg>

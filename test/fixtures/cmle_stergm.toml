@@ -1,0 +1,126 @@
+name = "cmle_stergm"
+
+[provenance]
+r_version = "4.6.1"
+tergm_version = "4.2.2"
+ergm_version = "4.12.0"
+network_version = "1.20.0"
+seed = 20260713
+recip_seed = 20261002
+script = "test/fixtures/r/cmle_stergm.R"
+date = "2026-10-02"
+dataset = "(a) main: the 25-actor, 8-wave directed panel of panel_stergm.toml, regenerated from the same seed (edge counts asserted); (b) recip: 20 actors, 5 directed waves drawn exactly, pair by pair, from Form(~edges + mutual) + Persist(~edges + mutual) at [values].recip_generating_*, frozen below"
+model = "Form(~edges + mutual) + Persist(~edges + mutual), estimate=\"CMLE\", control.tergm(seed = s) for each s in cmle_seeds; logLik() by tergm's bridge sampler; tri_*: Form(~edges + mutual + cyclicalties + transitiveties) + Persist(~the same) on the recip panel, CMLE under the same seeds and CMPLE"
+cmle_seeds = "1001,1002,1003,1004,1005,1006,1007,1008,1009,1010,1011"
+exact = "exact conditional MLE by enumeration of the <= 4 states of every unordered pair and Newton's method (no Monte Carlo); exact standard errors from the exact Fisher information"
+
+[tolerance]
+# A Monte-Carlo MLE is a random variable: two runs differ by their seeds.
+# `*_cmle_seed_sd` in [values] is tergm, refitted under 11 seeds,
+# disagreeing with itself. The Julia testset compares ONE seeded TERGM.jl
+# fit with the EXACT conditional MLE (`*_exact_coefficients`, computed here
+# without Monte Carlo) at 4 x that seed sd, floored at 5% of the exact
+# standard error: tergm's own seed sd on some coefficients is so small
+# (it adapts its MCMC sample size to an effective-size target, which
+# TERGM.jl does not) that 4 x sd would otherwise demand more precision
+# than a fixed-sample Monte-Carlo MLE has. 5% of a standard error is far
+# below anything that changes an inference, and on the reciprocity panel
+# it is far below the CMPLE-to-CMLE gap (`recip_cmple_minus_exact`), so a
+# fit that returned the CMPLE fails. Standard errors are compared with the
+# exact ones at 10% relative (the Fisher information is estimated from
+# the MCMC sample, plus the Monte-Carlo term). The log-likelihood is
+# compared with the exact maximum at 4 x tergm's seed sd of its bridge
+# estimate, floored at 0.5.
+main_exact_coefficients = 0.04886
+recip_exact_coefficients = 0.09345
+main_exact_loglik = 12.89
+recip_exact_loglik = 8.253
+#
+# THE TRIADIC MODEL (`tri_*`). No exact answer exists, so one seeded
+# TERGM.jl fit is compared with the MEAN of tergm's 11 fits. Both are
+# Monte-Carlo estimates of the same maximiser; the tolerance per
+# coefficient (`tri_coefficient_tolerances`) is 4 x tergm's seed sd x
+# sqrt(1 + 1/11) (the sd of a single fit minus an 11-fit mean), floored at
+# 10% of tergm's mean standard error -- the floor again because tergm's
+# adaptive sampling makes its seed sd smaller than a fixed-sample MCMLE's.
+# The CMPLE is deterministic and compared at 1e-6, as in panel_stergm.toml.
+tri_cmple_coefficients = 1e-6
+tri_cmple_std_errors = 1e-4
+tri_cmple_loglik = 1e-5
+
+[values]
+# --- (a) the main panel (frozen in panel_stergm.toml) ---------------------
+main_edge_counts = [68, 121, 165, 183, 209, 213, 218, 212]
+main_term_names = ["Form(1)~edges", "Form(1)~mutual", "Persist(1)~edges", "Persist(1)~mutual"]
+# the exact conditional MLE (pair enumeration + Newton): the target
+main_exact_coefficients = [-1.8131161153123192, 0.092084681420882428, 1.0970790645214705, 0.031605363294895696]
+main_exact_std_errors = [0.068870965472842119, 0.11788150664539392, 0.078297445137063035, 0.17550138875259971]
+main_exact_loglik = -1909.1325851859738
+main_exact_loglik_formation = -1248.6571551161719
+main_exact_loglik_persistence = -660.47543006980197
+# per-coefficient tolerance: max(4 x tergm's seed sd, 5% of the exact SE)
+main_coefficient_tolerances = [0.015095195750522023, 0.028740246911255631, 0.015053703847740225, 0.048855770730545735]
+# observed sufficient statistics (edges, mutual) of Y+ and of Y-, pooled
+main_observed_formation_statistics = [1614, 327]
+main_observed_persistence_statistics = [884, 102]
+# tergm estimate="CMLE" under 11 seeds: mean, seed-to-seed sd
+main_cmle_coefficients = [-1.8131900190412356, 0.092308691125847483, 1.096291078778052, 0.038246100949232489]
+main_cmle_seed_sd = [0.0037737989376305059, 0.0071850617278139076, 0.0037634259619350563, 0.012213942682636434]
+main_cmle_std_errors = [0.069464636068845259, 0.12005634389960924, 0.081293579399622368, 0.17697931309278617]
+main_cmle_std_errors_seed_sd = [0.0018629358875650018, 0.0056806606689005362, 0.0032472825398626786, 0.0059215033164962457]
+main_cmle_loglik = -1909.6279727303884
+main_cmle_loglik_seed_sd = 3.2231421007243162
+# tergm estimate="CMPLE" of the same model, and its distance from the exact CMLE
+main_cmple_coefficients = [-1.7917594687347433, 0.036813972895129145, 1.1104467463151111, -0.026433257068154529]
+main_cmple_minus_exact = [0.021356646577575855, -0.055270708525753283, 0.013367681793640562, -0.058038620363050228]
+# dyad-independent formula (edges + nodematch): tergm's CMLE is its CMPLE
+main_indep_cmle_coefficients = [-2.0947089970830519, 0.67389344159636533, 0.40546510810816339, 1.1823670255907321]
+main_indep_cmple_coefficients = [-2.0947089970830519, 0.67389344159636533, 0.40546510810816339, 1.1823670255907321]
+main_indep_cmle_vs_cmple_max_abs_diff = 0
+
+# --- (b) the reciprocity panel, frozen -------------------------------------
+recip_n_actors = 20
+recip_n_waves = 5
+recip_edge_counts = [41, 67, 69, 93, 99]
+recip_wave_src = [[3, 9, 11, 16, 8, 14, 20, 1, 11, 14, 15, 17, 18, 1, 13, 15, 7, 13, 5, 2, 3, 8, 9, 4, 10, 16, 5, 10, 18, 7, 11, 19, 12, 20, 20, 2, 7, 10, 14, 1, 16], [4, 13, 15, 3, 9, 17, 2, 8, 10, 14, 20, 3, 11, 14, 18, 19, 1, 1, 3, 9, 13, 15, 1, 3, 5, 12, 13, 20, 2, 7, 11, 3, 6, 19, 9, 12, 15, 16, 20, 4, 8, 16, 18, 4, 7, 8, 10, 3, 8, 1, 3, 11, 2, 3, 12, 20, 5, 7, 12, 14, 19, 20, 1, 7, 8, 17, 18], [8, 15, 20, 3, 9, 17, 2, 8, 10, 14, 20, 1, 3, 3, 11, 18, 10, 1, 4, 8, 15, 20, 3, 10, 12, 13, 20, 2, 7, 11, 13, 3, 6, 18, 19, 5, 9, 10, 16, 20, 16, 17, 18, 1, 3, 7, 9, 10, 2, 8, 9, 1, 7, 11, 7, 11, 12, 15, 2, 3, 2, 5, 12, 20, 7, 8, 8, 11, 18], [4, 8, 13, 3, 9, 12, 18, 2, 8, 10, 14, 17, 20, 1, 2, 3, 7, 8, 20, 1, 3, 11, 14, 18, 10, 14, 1, 8, 15, 16, 3, 6, 10, 18, 20, 2, 5, 7, 10, 11, 13, 3, 11, 16, 19, 5, 10, 12, 15, 16, 20, 2, 7, 11, 13, 16, 17, 19, 1, 5, 7, 9, 10, 12, 19, 5, 11, 16, 1, 2, 6, 7, 9, 11, 11, 12, 15, 19, 2, 3, 6, 12, 2, 10, 12, 15, 12, 14, 1, 3, 7, 8, 11], [4, 7, 8, 13, 17, 19, 20, 3, 4, 9, 12, 15, 18, 20, 2, 8, 10, 12, 17, 20, 1, 2, 7, 8, 1, 11, 14, 15, 18, 1, 9, 14, 1, 3, 6, 18, 20, 2, 7, 11, 13, 2, 3, 6, 11, 19, 5, 9, 12, 15, 2, 7, 11, 13, 16, 17, 5, 9, 12, 16, 18, 19, 3, 5, 6, 11, 16, 1, 2, 6, 11, 14, 17, 11, 12, 17, 19, 2, 3, 7, 12, 20, 2, 12, 15, 20, 2, 6, 10, 12, 16, 17, 20, 3, 4, 7, 8, 11, 19]]
+recip_wave_dst = [[2, 2, 2, 2, 3, 3, 3, 4, 4, 5, 5, 5, 5, 7, 7, 7, 8, 8, 9, 10, 10, 10, 11, 12, 12, 12, 13, 13, 14, 15, 15, 15, 17, 17, 18, 19, 19, 19, 19, 20, 20], [1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 5, 5, 5, 5, 5, 6, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 11, 11, 12, 12, 12, 12, 13, 13, 13, 13, 14, 14, 15, 15, 16, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 20, 20, 20, 20, 20], [1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 5, 5, 5, 6, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 11, 11, 11, 11, 11, 12, 12, 12, 13, 13, 13, 13, 13, 14, 14, 14, 15, 15, 15, 16, 16, 16, 16, 17, 17, 18, 18, 18, 18, 19, 19, 20, 20, 20], [1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 17, 17, 17, 17, 18, 18, 18, 18, 19, 19, 20, 20, 20, 20, 20], [1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 7, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 10, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 17, 17, 17, 17, 17, 18, 18, 18, 18, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20]]
+recip_generating_formation = [-2.6000000000000001, 1.8]
+recip_generating_persistence = [0.20000000000000001, 1.5]
+recip_term_names = ["Form(1)~edges", "Form(1)~mutual", "Persist(1)~edges", "Persist(1)~mutual"]
+# the exact conditional MLE (pair enumeration + Newton): the target
+recip_exact_coefficients = [-2.5829139068007896, 1.8524474982882997, 0.16166197475436611, 1.6037524725292112]
+recip_exact_std_errors = [0.12027870251591466, 0.21116809263116443, 0.15627546073584439, 0.33994633338568336]
+recip_exact_loglik = -587.68632456992259
+recip_exact_loglik_formation = -425.07387884204422
+recip_exact_loglik_persistence = -162.61244572787842
+# per-coefficient tolerance: max(4 x tergm's seed sd, 5% of the exact SE)
+recip_coefficient_tolerances = [0.022948253961315036, 0.040501472223786757, 0.035297514517281012, 0.093447355544648072]
+# observed sufficient statistics (edges, mutual) of Y+ and of Y-, pooled
+recip_observed_formation_statistics = [422, 126]
+recip_observed_persistence_statistics = [176, 41]
+# tergm estimate="CMLE" under 11 seeds: mean, seed-to-seed sd
+recip_cmle_coefficients = [-2.5800461960844832, 1.850594395805961, 0.16449803925671844, 1.6020998237429005]
+recip_cmle_seed_sd = [0.0057370634903287591, 0.010125368055946689, 0.0088243786293202529, 0.023361838886162018]
+recip_cmle_std_errors = [0.12013110937903271, 0.21240115187704212, 0.15595000938893316, 0.33927756118207369]
+recip_cmle_std_errors_seed_sd = [0.0041457612736118992, 0.0077030960294184169, 0.0044432980718119592, 0.010228581640844552]
+recip_cmle_loglik = -587.71369592013446
+recip_cmle_loglik_seed_sd = 2.0631926716989391
+# tergm estimate="CMPLE" of the same model, and its distance from the exact CMLE
+recip_cmple_coefficients = [-2.5425722916376055, 1.7762217070543642, 0.19948936041631982, 1.3740165427917166]
+recip_cmple_minus_exact = [0.04034161516318413, -0.076225791233935469, 0.037827385661953705, -0.22973592973749457]
+
+# --- (c) the tutorial's triadic formula on the reciprocity panel -----------
+tri_term_names = ["Form(1)~edges", "Form(1)~mutual", "Form(1)~cyclicalties", "Form(1)~transitiveties", "Persist(1)~edges", "Persist(1)~mutual", "Persist(1)~cyclicalties", "Persist(1)~transitiveties"]
+# tergm estimate="CMLE" under 11 seeds: mean, seed-to-seed sd, mean SE
+tri_cmle_coefficients = [-2.2460141244774441, 1.8374935708838089, 0.033447103130518324, -0.26293697106477093, 0.0010423446849411662, 1.6037072376927777, 0.16142694710083744, 0.097600477646953038]
+tri_cmle_seed_sd = [0.011766255823161697, 0.011155233854674878, 0.0038061931205677912, 0.0032260430329770951, 0.0087219951403379875, 0.019114640302599462, 0.0091111138599454886, 0.0085895215863664217]
+tri_cmle_std_errors = [0.20625021244483524, 0.21295388100435897, 0.12268909316239271, 0.14191210147078759, 0.18104672782852593, 0.34698928963289472, 0.16345605095306895, 0.19900635411634085]
+tri_cmle_std_errors_seed_sd = [0.0040632009273979001, 0.0074259101415482696, 0.003066292217167102, 0.002086495497366093, 0.0058601483146656381, 0.011817608004017483, 0.0037316796874423, 0.0059729228858584052]
+tri_cmle_loglik = -584.3392475941979
+tri_cmle_loglik_seed_sd = 1.6305914106067687
+# max(4 x seed sd x sqrt(1 + 1/11), 10% of the mean SE)
+tri_coefficient_tolerances = [0.049157813593705635, 0.046605047065426716, 0.015901756237035453, 0.01419121014707876, 0.03643930726288859, 0.079858362679507799, 0.038064992253234738, 0.035885850804852813]
+# tergm estimate="CMPLE" of the same model (deterministic)
+tri_cmple_coefficients = [-2.2302334698361705, 1.7642122417411004, 0.054848884462078119, -0.26163036908299292, 0.11252554851193353, 1.3364428709289675, 0.11937572404300759, 0.034429708217650033]
+tri_cmple_std_errors = [0.18053815264140385, 0.183326077665526, 0.089349636794960399, 0.10631624441328716, 0.17628479215265813, 0.3105841937833706, 0.12283147313875994, 0.15048167582807648]
+tri_cmple_loglik = -575.7477950434785
